@@ -1,6 +1,12 @@
 import cv2
 import os
 from ball_detection import BallDetector
+from frame_extractor import extract_frames
+
+video_path = "videos/vid2.mp4"
+print("[INFO] Extracting frames...")
+frame_paths = extract_frames(video_path)
+frames = [cv2.imread(f) for f in frame_paths]
 
 # Local dataset path
 dataset_path = "Cricket Ball Detection.v1i.yolov8"
