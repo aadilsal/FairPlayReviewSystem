@@ -1,0 +1,11 @@
+opencv-python>=4.8.0
+ultralytics>=8.0.0
+torch>=1.13.0
+torchvision>=0.14.0
+numpy>=1.21.0
+scipy>=1.9.0
+Pillow>=9.0.0
+pathlib2>=2.3.0
+argparse>=1.4.0
+tqdm>=4.64.0
+
