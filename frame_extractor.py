@@ -46,7 +46,6 @@ def extract_frames(video_path, output_folder="outputs/frames", target_fps=30):
     frames = []
     
     print("Extracting frames...")
-    
     while True:
         ret, frame = cap.read()
         if not ret:
