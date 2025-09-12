@@ -1,145 +1,209 @@
 import cv2
 import os
-from ball_detection import BallDetector
+import argparse
+import time
+from pathlib import Path
+from ball_detect import CricketBallDetector
 from frame_extractor import extract_frames
 from person_detector import detect_persons
 from pose_estimator import estimate_pose
 
-videos_folder = "videos"
-output_frames_folder = "frame"
-
-# Get all video files in the videos folder
-video_extensions = ['.mp4', '.avi', '.mov', '.mkv']
-video_files = [f for f in os.listdir(videos_folder) if any(f.lower().endswith(ext) for ext in video_extensions)]
-
-all_frames = {}
-
-print("[INFO] Extracting frames from all videos...")
-for video_file in video_files:
-    video_path = os.path.join(videos_folder, video_file)
-    video_name = os.path.splitext(video_file)[0]
+def extract_video_frames(video_path, output_frames_folder, target_fps=30):
+    """
+    Extract frames from a video at the specified FPS.
+    Only extracts if frames don't already exist.
+    Returns a list of frame paths.
+    """
+    video_name = os.path.splitext(os.path.basename(video_path))[0]
     video_output_folder = os.path.join(output_frames_folder, video_name)
-    
-    # Check if frames already exist for this video
+    # --- CHECK: If frames already extracted, skip extraction ---
     if os.path.exists(video_output_folder):
         existing_frames = [f for f in os.listdir(video_output_folder) if f.lower().endswith('.jpg')]
         if existing_frames:
-            print(f"Frames already exist for {video_file}, skipping extraction.")
-            all_frames[video_name] = [os.path.join(video_output_folder, f) for f in sorted(existing_frames)]
+            print(f"Frames already exist for {video_name}, skipping extraction.")
+            return [os.path.join(video_output_folder, f) for f in sorted(existing_frames)]
+    os.makedirs(video_output_folder, exist_ok=True)
+    frame_paths = extract_frames(video_path, output_folder=video_output_folder, target_fps=target_fps)
+    print(f"Extracted {len(frame_paths)} frames from {video_name} to {video_output_folder}")
+    return frame_paths
+
+def run_person_and_pose_detection_on_frames(frame_paths):
+    """
+    For each frame, run person detection and pose estimation.
+    Uses marker files to avoid redundant processing.
+    """
+    print("[INFO] Running person detection and pose estimation...")
+    for frame_path in frame_paths:
+        pose_marker = frame_path + ".pose"
+        if os.path.exists(pose_marker):
+            print(f"[INFO] Pose already estimated for {frame_path}, skipping.")
             continue
 
-    os.makedirs(video_output_folder, exist_ok=True)
-    frame_paths = extract_frames(video_path, output_folder=video_output_folder)
-    all_frames[video_name] = frame_paths
-    print(f"Extracted {len(frame_paths)} frames from {video_file} to {video_output_folder}")
-
-
-print("[INFO] Running person detection and pose estimation on a few frames from vid2...")
-
-vid2_frames = all_frames.get("vid2", [])
-for frame_path in vid2_frames:  # just test first 3 frames of vid2
-    pose_marker = frame_path + ".pose"
-    if os.path.exists(pose_marker):
-        print(f"[INFO] Pose already estimated for {frame_path}, skipping.")
-        continue
-
-    person_marker = frame_path + ".person"
-    if not os.path.exists(person_marker):
-        frame = cv2.imread(frame_path)
-        frame_with_persons, detections = detect_persons(frame)
-        cv2.imwrite(frame_path, frame_with_persons)
-        # Create a marker file to indicate person detection is done
-        with open(person_marker, "w") as f:
-            f.write("person detected")
-    else:
-        frame_with_persons = cv2.imread(frame_path)
-
-    frame_with_pose, keypoints = estimate_pose(frame_with_persons)
-    print(f"[DEBUG] {frame_path} -> {len(keypoints)} persons detected with skeletons")
-    cv2.imshow("Pose Estimation", frame_with_pose)
-    cv2.imwrite(frame_path, frame_with_pose)
-    # Create a marker file to indicate pose estimation is done
-    with open(pose_marker, "w") as f:
-        f.write("pose estimated")
-    cv2.waitKey(0)  # press any key for next frame
-
-cv2.destroyAllWindows()
-
-print("[INFO]  person detection Completed...")
-
-
-
-# Load frames for further processing (example: first video)
-if all_frames:
-    first_video = next(iter(all_frames))
-    frames = [cv2.imread(f) for f in all_frames[first_video]]
-else:
-    frames = []
-
-# video_path = "videos/vid2.mp4"
-# print("[INFO] Extracting frames...")
-# frame_paths = extract_frames(video_path)
-# frames = [cv2.imread(f) for f in frame_paths]
-
-# Local dataset path
-dataset_path = "Cricket Ball Detection.v1i.yolov8"
-print("Using local dataset at:", dataset_path)
-
-# Define paths for training images
-train_images_dir = os.path.join(dataset_path, "train", "images")
-valid_images_dir = os.path.join(dataset_path, "valid", "images")
-
-# Load training images
-def load_images_from_folder(folder, limit=50):
-    imgs = []
-    if not os.path.exists(folder):
-        print(f"Warning: Folder {folder} does not exist")
-        return imgs
-    
-    image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
-    image_files = [f for f in os.listdir(folder) if any(f.lower().endswith(ext) for ext in image_extensions)]
-    
-    for i, filename in enumerate(image_files):
-        if i >= limit: 
-            break
-        img_path = os.path.join(folder, filename)
-        img = cv2.imread(img_path)
-        if img is not None:
-            imgs.append(img)
+        person_marker = frame_path + ".person"
+        # --- CHECK: If person already detected, skip detection ---
+        if not os.path.exists(person_marker):
+            frame = cv2.imread(frame_path)
+            frame_with_persons, detections = detect_persons(frame)
+            cv2.imwrite(frame_path, frame_with_persons)
+            with open(person_marker, "w") as f:
+                f.write("person detected")
         else:
-            print(f"Warning: Could not load image {img_path}")
-    
-    print(f"Loaded {len(imgs)} images from {folder}")
-    return imgs
+            frame_with_persons = cv2.imread(frame_path)
 
-# Load training images (positive samples - images with balls)
-positive_images = load_images_from_folder(train_images_dir, limit=100)
+        frame_with_pose, keypoints = estimate_pose(frame_with_persons)
+        print(f"[DEBUG] {frame_path} -> {len(keypoints)} persons detected with skeletons")
+        #cv2.imshow("Pose Estimation", frame_with_pose)
+        cv2.imwrite(frame_path, frame_with_pose)
+        with open(pose_marker, "w") as f:
+            f.write("pose estimated")
+        cv2.waitKey(0)  # press any key for next frame
 
-# For negative samples, we'll use some images from validation set
-# In a real scenario, you might want to create a separate negative dataset
-negative_images = load_images_from_folder(valid_images_dir, limit=50)
-
-# Train + init detectors
-detector = BallDetector()
-if positive_images and negative_images:
-    detector.train(positive_images, negative_images)
-    print("SVM trained with {} positives and {} negatives".format(len(positive_images), len(negative_images)))
-else:
-    print("Skipping SVM training (no dataset found)")
-
-# Load and train YOLO model on the local dataset
-detector.load_yolo(dataset_path)
-
-# Test detection on a sample image
-if positive_images:
-    test_img = positive_images[0]
-    detections = detector.detect(test_img)
-
-    for (x, y, w, h) in detections:
-        cv2.rectangle(test_img, (x, y), (x+w, y+h), (0, 255, 0), 2)
-
-    cv2.imshow("Ball Detection", test_img)
-    cv2.waitKey(0)
     cv2.destroyAllWindows()
-else:
-    print("No test images found.")
+    print("[INFO] Person detection and pose estimation completed.")
+
+class CricketBallTracker:
+    def __init__(self, yolo_model_path='yolov8n.pt'):
+        self.detector = CricketBallDetector(yolo_model_path)
+        self.results = []
+
+    def process_video(self, video_path, output_dir="outputs/video", 
+                     frame_output_dir="outputs/frames", target_fps=10, 
+                     methods=['color_optimized']):
+        print(f"Processing video: {video_path}")
+        print("Extracting frames...")
+        frame_paths = extract_frames(video_path, frame_output_dir, target_fps)
+        print(f"Extracted {len(frame_paths)} frames")
+        if not frame_paths:
+            print("Error: No frames extracted from video")
+            return
+        os.makedirs(output_dir, exist_ok=True)
+        for method in methods:
+            print(f"\nProcessing frames with {method} method...")
+            method_output_dir = os.path.join(output_dir, method)
+            os.makedirs(method_output_dir, exist_ok=True)
+            processed_frames = []
+            total_detections = 0
+            total_time = 0
+            for i, frame_path in enumerate(frame_paths):
+                if i % 10 == 0:
+                    print(f"  Processing frame {i+1}/{len(frame_paths)}")
+                frame = cv2.imread(frame_path)
+                if frame is None:
+                    continue
+                start_time = time.time()
+                detections = self.detector.detect_ball(frame, method=method)
+                processing_time = time.time() - start_time
+                total_detections += len(detections)
+                total_time += processing_time
+                result_frame = self.detector.visualize_detections(frame, detections)
+                frame_name = f"processed_frame_{i:04d}.jpg"
+                output_frame_path = os.path.join(method_output_dir, frame_name)
+                cv2.imwrite(output_frame_path, result_frame)
+                processed_frames.append(output_frame_path)
+                self.results.append({
+                    'frame_path': frame_path,
+                    'frame_number': i,
+                    'method': method,
+                    'detections': detections,
+                    'processing_time': processing_time,
+                    'output_path': output_frame_path
+                })
+            print(f"  Method {method} complete:")
+            print(f"    Total detections: {total_detections}")
+            print(f"    Average processing time: {total_time/len(frame_paths):.3f}s per frame")
+            print(f"    Processed frames saved to: {method_output_dir}")
+            self.create_output_video(processed_frames, 
+                                   os.path.join(output_dir, f"output_{method}.mp4"),
+                                   target_fps)
+
+    def create_output_video(self, frame_paths, output_video_path, fps=10):
+        if not frame_paths:
+            return
+        print(f"Creating output video: {output_video_path}")
+        first_frame = cv2.imread(frame_paths[0])
+        if first_frame is None:
+            print("Error: Could not read first frame for video creation")
+            return
+        height, width, layers = first_frame.shape
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+        for frame_path in frame_paths:
+            frame = cv2.imread(frame_path)
+            if frame is not None:
+                out.write(frame)
+        out.release()
+        print(f"Output video saved to: {output_video_path}")
+
+    def generate_report(self, output_file="detection_report.txt"):
+        if not self.results:
+            print("No results to report")
+            return
+        print(f"Generating report: {output_file}")
+        with open(output_file, 'w') as f:
+            f.write("Cricket Ball Detection Report\n")
+            f.write("=" * 40 + "\n\n")
+            methods = {}
+            for result in self.results:
+                method = result['method']
+                if method not in methods:
+                    methods[method] = []
+                methods[method].append(result)
+            for method, results in methods.items():
+                f.write(f"Method: {method.upper()}\n")
+                f.write("-" * 20 + "\n")
+                total_detections = sum(len(r['detections']) for r in results)
+                avg_time = sum(r['processing_time'] for r in results) / len(results)
+                f.write(f"Total frames/images processed: {len(results)}\n")
+                f.write(f"Total ball detections: {total_detections}\n")
+                f.write(f"Average processing time: {avg_time:.3f}s\n")
+                f.write(f"Detection rate: {total_detections/len(results):.2f} balls per frame\n\n")
+                frames_with_balls = [r for r in results if len(r['detections']) > 0]
+                if frames_with_balls:
+                    f.write("Frames with ball detections:\n")
+                    for result in frames_with_balls:
+                        frame_info = result.get('frame_number', 'N/A')
+                        f.write(f"  Frame {frame_info}: {len(result['detections'])} ball(s)\n")
+                f.write("\n")
+        print(f"Report saved to: {output_file}")
+
+def main():
+    parser = argparse.ArgumentParser(description='Cricket Ball Detection System')
+    parser.add_argument('--input', '-i', required=True, 
+                       help='Path to input video file')
+    parser.add_argument('--output', '-o', default='outputs',
+                       help='Output directory (default: outputs)')
+    parser.add_argument('--fps', type=int, default=30,
+                       help='Target FPS for video frame extraction (default: 30)')
+    parser.add_argument('--max_frames', type=int, default=3,
+                       help='Number of frames to run pose estimation on (default: 3)')
+    args = parser.parse_args()
+
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(f"Error: Input file {args.input} does not exist")
+        return
+
+    video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'}
+    file_extension = input_path.suffix.lower()
+
+    if file_extension in video_extensions:
+        # 1. Extract frames (if not already done)
+        frame_paths = extract_video_frames(
+            str(input_path),
+            os.path.join(args.output, 'frames'),
+            target_fps=args.fps
+        )
+        # 2. Run person and pose detection (if not already done)
+        run_person_and_pose_detection_on_frames(
+            frame_paths,
+            #max_frames=args.max_frames
+        )
+        print("\nProcessing complete!")
+        print(f"Frames and results saved to: {os.path.join(args.output, 'frames')}")
+    else:
+        print(f"Error: Only video files are supported for this workflow.")
+        print(f"Supported video formats: {', '.join(video_extensions)}")
+        return
+
+if __name__ == "__main__":
+    main()
