@@ -8,6 +8,11 @@ A simple pipeline to detect and visualize a cricket ball in images or videos usi
 - Windows, macOS, or Linux
 - GPU optional (CUDA recommended for speed)
 
+  ### work done so far
+  - ball detection
+  - person detection
+  - frame extraction
+
 ### Setup
 
 ```bash
