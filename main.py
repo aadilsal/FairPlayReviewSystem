@@ -2,6 +2,8 @@ import cv2
 import os
 from ball_detection import BallDetector
 from frame_extractor import extract_frames
+from person_detector import detect_persons
+from pose_estimator import estimate_pose
 
 videos_folder = "videos"
 output_frames_folder = "frame"
@@ -30,6 +32,41 @@ for video_file in video_files:
     frame_paths = extract_frames(video_path, output_folder=video_output_folder)
     all_frames[video_name] = frame_paths
     print(f"Extracted {len(frame_paths)} frames from {video_file} to {video_output_folder}")
+
+
+print("[INFO] Running person detection and pose estimation on a few frames from vid2...")
+
+vid2_frames = all_frames.get("vid2", [])
+for frame_path in vid2_frames:  # just test first 3 frames of vid2
+    pose_marker = frame_path + ".pose"
+    if os.path.exists(pose_marker):
+        print(f"[INFO] Pose already estimated for {frame_path}, skipping.")
+        continue
+
+    person_marker = frame_path + ".person"
+    if not os.path.exists(person_marker):
+        frame = cv2.imread(frame_path)
+        frame_with_persons, detections = detect_persons(frame)
+        cv2.imwrite(frame_path, frame_with_persons)
+        # Create a marker file to indicate person detection is done
+        with open(person_marker, "w") as f:
+            f.write("person detected")
+    else:
+        frame_with_persons = cv2.imread(frame_path)
+
+    frame_with_pose, keypoints = estimate_pose(frame_with_persons)
+    print(f"[DEBUG] {frame_path} -> {len(keypoints)} persons detected with skeletons")
+    cv2.imshow("Pose Estimation", frame_with_pose)
+    cv2.imwrite(frame_path, frame_with_pose)
+    # Create a marker file to indicate pose estimation is done
+    with open(pose_marker, "w") as f:
+        f.write("pose estimated")
+    cv2.waitKey(0)  # press any key for next frame
+
+cv2.destroyAllWindows()
+
+print("[INFO]  person detection Completed...")
+
 
 
 # Load frames for further processing (example: first video)
