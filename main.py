@@ -3,7 +3,7 @@ import os
 import argparse
 import time
 from pathlib import Path
-from ball_detect import CricketBallDetector
+from ball_detect import BallTracker
 from frame_extractor import extract_frames
 
 class CricketBallTracker:
@@ -14,7 +14,17 @@ class CricketBallTracker:
         Args:
             yolo_model_path: Path to YOLO model weights
         """
-        self.detector = CricketBallDetector(yolo_model_path)
+        config = {
+            "max_tracking_distance": 100,
+            "min_detection_confidence": 0.5,
+            "gravity": 9.8,
+            "air_resistance": 0.1,
+            "frame_rate": 30,
+            "use_kalman": True,
+            "max_lost_frames": 10,
+            "min_ball_radius": 5
+        }
+        self.tracker = BallTracker(config)
         self.results = []
     
     def process_single_image(self, image_path, output_dir="outputs/images", methods=['color_optimized']):
@@ -108,40 +118,32 @@ class CricketBallTracker:
                 # Load frame
                 frame = cv2.imread(frame_path)
                 if frame is None:
+                    print(f"Error: Could not load frame {frame_path}")
                     continue
                 
+                # Detect balls using BallTracker
                 start_time = time.time()
-                
-                # Detect balls
-                detections = self.detector.detect_ball(frame, method=method)
+                detection = self.tracker.detect_ball_candidate(frame)
                 processing_time = time.time() - start_time
                 
-                total_detections += len(detections)
-                total_time += processing_time
-                
-                # Visualize results
-                result_frame = self.detector.visualize_detections(frame, detections)
+                if detection:
+                    print(f"  Detected ball at {detection[0]} with radius {detection[1]}")
+                    total_detections += 1
+                    
+                    # Draw detection on frame
+                    center, radius = detection
+                    cv2.circle(frame, center, radius, (0, 255, 0), 2)
                 
                 # Save processed frame
-                frame_name = f"processed_frame_{i:04d}.jpg"
-                output_frame_path = os.path.join(method_output_dir, frame_name)
-                cv2.imwrite(output_frame_path, result_frame)
-                processed_frames.append(output_frame_path)
-                
-                # Store frame results
-                self.results.append({
-                    'frame_path': frame_path,
-                    'frame_number': i,
-                    'method': method,
-                    'detections': detections,
-                    'processing_time': processing_time,
-                    'output_path': output_frame_path
-                })
+                processed_frame_path = os.path.join(method_output_dir, f"processed_frame_{i+1:04d}.jpg")
+                cv2.imwrite(processed_frame_path, frame)
+                processed_frames.append(processed_frame_path)
+                total_time += processing_time
             
-            print(f"  Method {method} complete:")
-            print(f"    Total detections: {total_detections}")
-            print(f"    Average processing time: {total_time/len(frame_paths):.3f}s per frame")
-            print(f"    Processed frames saved to: {method_output_dir}")
+            print(f"\n{method} method completed:")
+            print(f"  Total detections: {total_detections}")
+            print(f"  Total processing time: {total_time:.2f}s")
+            print(f"  Processed frames saved to: {method_output_dir}")
             
             # Create output video from processed frames
             self.create_output_video(processed_frames, 
