@@ -215,10 +215,13 @@ def main():
         return
 
 if __name__ == "__main__":
+    
     video_path = "test_videos\\lbw.mp4"  # Change to your video path
     frame_output_dir = "outputs/frames"
+    
     os.makedirs(frame_output_dir, exist_ok=True)
-    frame_paths = extract_frames(video_path, frame_output_dir, target_fps=10)
+    
+    frame_paths = extract_video_frames(video_path, frame_output_dir, target_fps=10)
     print(f"Extracted {len(frame_paths)} frames")
     color_finder = ColorFinder(False)
     yolo_detector = YOLOBallDetector('outputs/yolov8_cricket_ball2/weights/best.pt')  # Use trained cricket ball model
