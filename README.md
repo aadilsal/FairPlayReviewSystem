@@ -2,6 +2,16 @@ A simple pipeline to detect and visualize a cricket ball in images or videos usi
 
 ### Requirements
 
+- Python 3.9+ (recommended)
+- Windows, macOS, or Linux
+- GPU optional (CUDA recommended for speed)
+
+  ### work done so far
+
+  - ball detection
+  - person detection
+  - frame extraction
+
 ### Setup
 
 ```bash
