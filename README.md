@@ -1,12 +1,6 @@
-## Cricket Ball Detection – YOLOv8 + Classic CV
-
 A simple pipeline to detect and visualize a cricket ball in images or videos using Ultralytics YOLOv8 (fastest) and classic computer vision (sliding window with color optimization).
 
 ### Requirements
-
-- Python 3.9+ (recommended)
-- Windows, macOS, or Linux
-- GPU optional (CUDA recommended for speed)
 
 ### Setup
 
@@ -29,23 +23,78 @@ pip install -r requirements.txt
 
 ### Quick Start
 
-- Fastest test (YOLO direct on a video):
-
 ```bash
 python main.py -i test_videos/vid1.mp4 -m yolo_direct --fps 2
 ```
 
-- Single image test:
+````bash
+## Cricket Ball Detection – YOLOv8 + Color-Based Fallback
+
+Detect and visualize cricket balls in images or videos using a custom-trained Ultralytics YOLOv8 model and classic color-based computer vision as fallback.
+
+### Requirements
+
+- Python 3.13+ (recommended)
+- Windows, macOS, or Linux
+- GPU optional (CUDA recommended for speed)
+
+### Setup
 
 ```bash
-python main.py -i outputs/frames/frame_0000.jpg -m yolo_direct
+# Clone
+git clone <your-repo-url>
+cd "APNA PROJECT"
+
+# Create and activate venv (Windows PowerShell)
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Or (macOS/Linux)
+# python3 -m venv .venv
+# source .venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+````
+
+### Dataset Download
+
+Download the cricket ball dataset using kagglehub:
+
+```python
+import kagglehub
+path = kagglehub.dataset_download("kushagra3204/cricket-ball-dataset-for-yolo")
 ```
+
+Copy the dataset into your workspace as `cricket_ball_data` and ensure it contains `train`, `valid`, and `test` folders with `images` and `labels` subfolders.
+
+### Training YOLOv8
+
+Train the custom YOLOv8 model:
+
+```python
+from ultralytics import YOLO
+YOLO('yolov8n.pt').train(data='cricket_ball_data/data.yaml', epochs=50, imgsz=640, project='outputs', name='yolov8_cricket_ball')
+```
+
+### Running Detection
+
+Run detection on a video:
+
+```bash
+python main.py
+```
+
+The pipeline will use your trained YOLOv8 model (`outputs/yolov8_cricket_ball2/weights/best.pt`) for detection, falling back to color-based detection if needed.
+python main.py -i outputs/frames/frame_0000.jpg -m yolo_direct
+
+````
 
 - Classic but still quick (color optimized):
 
 ```bash
 python main.py -i test_videos/vid1.mp4 -m color_optimized --fps 2
-```
+````
 
 ### CLI Usage
 

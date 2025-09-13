@@ -1,0 +1,5 @@
+train: D:/FYP/APNA PROJECT/cricket_ball_data/train/images
+val: D:/FYP/APNA PROJECT/cricket_ball_data/valid/images
+test: D:/FYP/APNA PROJECT/cricket_ball_data/test/images
+nc: 1
+names: ["ball"]
