@@ -32,10 +32,7 @@ Thumbs.db
 .ipynb_checkpoints/
 
 # Project outputs and artifacts
-outputs/
-!outputs/.gitkeep
-runs/
-ultralytics/
+
 
 # Videos and large media
 test_videos/
@@ -49,9 +46,6 @@ test_videos/
 *.webm
 
 # Model weights and large binaries
-*.pt
-*.onnx
-*.engine
 
 # Caches
 .cache/
