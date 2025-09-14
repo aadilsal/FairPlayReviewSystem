@@ -222,23 +222,31 @@ if __name__ == "__main__":
     print(f"Extracted {len(frame_paths)} frames")
     color_finder = ColorFinder(False)
     yolo_detector = YOLOBallDetector('outputs/yolov8_cricket_ball2/weights/best.pt')  # Use trained cricket ball model
+    from person_detector import detect_persons
+    print("Running ball and person detection on frames...")
     for frame_path in frame_paths:
         img = cv2.imread(frame_path)
-        # First, try YOLO detection
+        # Run ball detection
         yolo_detections = yolo_detector.detect(img)
+        # Run person detection
+        img_with_persons, person_detections = detect_persons(img)
+        # Draw ball detections on top of person detections
         if yolo_detections:
-            # Draw YOLO detections
             for (x, y, w, h, confidence) in yolo_detections:
-                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(img, f"YOLO {confidence:.2f}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            cv2.imshow("Ball Detection", img)
+                cv2.rectangle(img_with_persons, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                cv2.putText(img_with_persons, f"Ball {confidence:.2f}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.imshow("Ball & Person Detection", img_with_persons)
         else:
             # Fallback to color-based detection
             img_contours, x, y = ball_detect(img, color_finder, hsv_vals)
             if img_contours is not None:
-                cv2.imshow("Ball Detection", img_contours)
+                # Overlay ball contour on person detection frame
+                overlay = img_with_persons.copy()
+                mask = cv2.cvtColor(img_contours, cv2.COLOR_BGR2GRAY)
+                overlay[mask > 0] = img_contours[mask > 0]
+                cv2.imshow("Ball & Person Detection", overlay)
             else:
-                cv2.imshow("Ball Detection", img)
+                cv2.imshow("Ball & Person Detection", img_with_persons)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
     cv2.destroyAllWindows()
