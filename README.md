@@ -9,8 +9,11 @@ A simple pipeline to detect and visualize a cricket ball in images or videos usi
   ### work done so far
 
   - ball detection
-  - person detection
+  - person detection + exoskeletan
   - frame extraction
+  - detection pipeline made of the existing models
+  
+
 
 ### Setup
 
