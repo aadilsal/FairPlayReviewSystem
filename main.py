@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import cv2
 import os
 import argparse
@@ -197,71 +198,24 @@ class CricketBallTracker:
                         f.write(f"  Frame {frame_info}: {len(result['detections'])} ball(s)\n")
                 f.write("\n")
         print(f"Report saved to: {output_file}")
+=======
+import argparse
+from frame_extractor import extract_video_frames
+from detection_pipeline import process_frames_pipeline
+from video_utils import frames_to_video_with_custom_path
+>>>>>>> afe74f541b3bd1d32fe1991c7205c6dcdd5ec3e6
 
 def main():
-    parser = argparse.ArgumentParser(description='Cricket Ball Detection System')
-    parser.add_argument('--input', '-i', required=True, 
-                       help='Path to input video file')
-    parser.add_argument('--output', '-o', default='outputs',
-                       help='Output directory (default: outputs)')
-    parser.add_argument('--fps', type=int, default=30,
-                       help='Target FPS for video frame extraction (default: 30)')
-    parser.add_argument('--max_frames', type=int, default=3,
-                       help='Number of frames to run pose estimation on (default: 3)')
+    parser = argparse.ArgumentParser(description='FairPlayReviewSystem')
+    parser.add_argument('--input', '-i', required=True, help='Path to input video file')
+    parser.add_argument('--output', '-o', default='outputs', help='Output directory')
+    parser.add_argument('--fps', type=int, default=30, help='FPS for frame extraction and output video')
     args = parser.parse_args()
 
-    input_path = Path(args.input)
-    if not input_path.exists():
-        print(f"Error: Input file {args.input} does not exist")
-        return
-
-    video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm'}
-    file_extension = input_path.suffix.lower()
-
-    if file_extension in video_extensions:
-        # 1. Extract frames (if not already done)
-        frame_paths = extract_video_frames(
-            str(input_path),
-            os.path.join(args.output, 'frames'),
-            target_fps=args.fps
-        )
-        # 2. Run person and pose detection (if not already done)
-        run_person_and_pose_detection_on_frames(
-            frame_paths,
-            #max_frames=args.max_frames
-        )
-        print("\nProcessing complete!")
-        print(f"Frames and results saved to: {os.path.join(args.output, 'frames')}")
-    else:
-        print(f"Error: Only video files are supported for this workflow.")
-        print(f"Supported video formats: {', '.join(video_extensions)}")
-        return
+    frame_paths, frames_dir = extract_video_frames(args.input, args.output, args.fps)
+    process_frames_pipeline(frame_paths)
+    output_video_path = frames_to_video_with_custom_path(args.input, frames_dir, args.fps, args.output)
+    print(f"Output video saved to: {output_video_path}")
 
 if __name__ == "__main__":
-    video_path = "test_videos\\lbw.mp4"  # Change to your video path
-    frame_output_dir = "outputs/frames"
-    os.makedirs(frame_output_dir, exist_ok=True)
-    frame_paths = extract_frames(video_path, frame_output_dir, target_fps=10)
-    print(f"Extracted {len(frame_paths)} frames")
-    color_finder = ColorFinder(False)
-    yolo_detector = YOLOBallDetector('outputs/yolov8_cricket_ball2/weights/best.pt')  # Use trained cricket ball model
-    for frame_path in frame_paths:
-        img = cv2.imread(frame_path)
-        # First, try YOLO detection
-        yolo_detections = yolo_detector.detect(img)
-        if yolo_detections:
-            # Draw YOLO detections
-            for (x, y, w, h, confidence) in yolo_detections:
-                cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(img, f"YOLO {confidence:.2f}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            cv2.imshow("Ball Detection", img)
-        else:
-            # Fallback to color-based detection
-            img_contours, x, y = ball_detect(img, color_finder, hsv_vals)
-            if img_contours is not None:
-                cv2.imshow("Ball Detection", img_contours)
-            else:
-                cv2.imshow("Ball Detection", img)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-    cv2.destroyAllWindows()
+    main()
