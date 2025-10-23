@@ -19,7 +19,7 @@ def iou(boxA, boxB):
     boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
     return interArea / float(boxAArea + boxBArea - interArea)
 
-def detect_persons(frame, batsman_conf=0.3, person_conf=0.6, iou_threshold=0.4):
+def detect_persons(frame, batsman_conf=0.3, person_conf=0.6, iou_threshold=0.5):
     batsman_results = batsman_model.predict(frame, conf=batsman_conf, verbose=False)
     batsman_boxes = []
     detections = []
