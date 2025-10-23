@@ -1,8 +1,20 @@
 import os
 import cv2
+import argparse
+
 
 def extract_video_frames(video_path, output_dir, target_fps=30):
-    import os
+    """Extract frames from video and save as JPEGs.
+
+    Args:
+        video_path (str): Path to the input video file.
+        output_dir (str): Directory where frames will be saved. Frames are placed in
+            output_dir/frames/<video_name>.
+        target_fps (int): Approximate number of frames to extract per second.
+
+    Returns:
+        tuple: (list_of_frame_paths, frames_dir)
+    """
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     frames_dir = os.path.join(output_dir, "frames", video_name)
     os.makedirs(frames_dir, exist_ok=True)
@@ -18,8 +30,9 @@ def extract_video_frames(video_path, output_dir, target_fps=30):
     if not cap.isOpened():
         raise FileNotFoundError(f"Could not open video file {video_path}")
 
-    original_fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_interval = int(round(original_fps / target_fps)) if original_fps > target_fps else 1
+    original_fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    # Prevent division by zero and ensure integer interval
+    frame_interval = int(round(original_fps / target_fps)) if original_fps > target_fps and target_fps > 0 else 1
     count = 0
     saved = 0
     while True:
@@ -35,3 +48,17 @@ def extract_video_frames(video_path, output_dir, target_fps=30):
     cap.release()
     print(f"Extracted {len(frame_paths)} frames to {frames_dir}")
     return frame_paths, frames_dir
+
+
+def _parse_args():
+    p = argparse.ArgumentParser(description="Extract frames from a video file")
+    p.add_argument("-i", "--input", required=True, help="Path to input video file")
+    p.add_argument("-o", "--output", default="outputs", help="Output directory (default: outputs)")
+    p.add_argument("-f", "--fps", type=int, default=30, help="Target frames per second to extract (default: 30)")
+    return p.parse_args()
+
+
+if __name__ == "__main__":
+    args = _parse_args()
+    frames, dirpath = extract_video_frames(args.input, args.output, args.fps)
+    print(f"Done. Frames saved to: {dirpath}")
