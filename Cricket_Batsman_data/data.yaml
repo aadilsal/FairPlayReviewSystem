@@ -1,0 +1,13 @@
+train: D:\Zaid\FYP\FairPlayReviewSystem\Cricket_Batsman_data\train\images
+val: D:\Zaid\FYP\FairPlayReviewSystem\Cricket_Batsman_data\valid\images
+test: D:\Zaid\FYP\FairPlayReviewSystem\Cricket_Batsman_data\test\images
+
+nc: 1
+names: ['Batsman']
+
+# roboflow:
+#   workspace: fyp-project-62uhx
+#   project: batsman-tnwyt
+#   version: 2
+#   license: CC BY 4.0
+#   url: https://universe.roboflow.com/fyp-project-62uhx/batsman-tnwyt/dataset/2
