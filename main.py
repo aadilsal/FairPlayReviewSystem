@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import cv2
 import os
 import argparse
@@ -198,12 +197,10 @@ class CricketBallTracker:
                         f.write(f"  Frame {frame_info}: {len(result['detections'])} ball(s)\n")
                 f.write("\n")
         print(f"Report saved to: {output_file}")
-=======
 import argparse
 from frame_extractor import extract_video_frames
 from detection_pipeline import process_frames_pipeline
 from video_utils import frames_to_video_with_custom_path
->>>>>>> afe74f541b3bd1d32fe1991c7205c6dcdd5ec3e6
 
 def main():
     parser = argparse.ArgumentParser(description='FairPlayReviewSystem')
