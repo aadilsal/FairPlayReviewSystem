@@ -1,5 +1,6 @@
 import cv2
 from ball_detector import detect_ball_on_frame
+from weights_config import YOLO_BALL_WEIGHTS
 from person_detector import detect_persons
 from pose_estimator import estimate_pose
 import os
@@ -16,9 +17,9 @@ def process_frames_pipeline(frame_paths):
 
         frame = cv2.imread(frame_path)
 
-        # Ball detection (YOLO, fallback to color)
+        # Ball detection (YOLO, fallback to color) - use runtime-configured weights
         if not os.path.exists(ball_marker):
-            frame_with_ball, ball_detected = detect_ball_on_frame(frame)
+            frame_with_ball, ball_detected = detect_ball_on_frame(frame, yolo_weights=YOLO_BALL_WEIGHTS)
             cv2.imwrite(frame_path, frame_with_ball)
             with open(ball_marker, "w") as f:
                 f.write("ball detected")

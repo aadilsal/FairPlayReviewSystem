@@ -1,0 +1,8 @@
+# Parameters for DVC pipeline
+weights: yolov8s.pt
+data: cricket_ball_data/data.yaml
+epochs: 20
+batch: 4
+name: yolov8s-cricket-ball
+imgsz: 640
+device: auto
