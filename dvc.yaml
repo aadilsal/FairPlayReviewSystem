@@ -1,0 +1,25 @@
+stages:
+  train:
+    cmd: python train_yolo.py -w ${weights} -d ${data} -e ${epochs} -b ${batch} -n ${name} --imgsz ${imgsz} --device ${device}
+    deps:
+      - train_yolo.py
+      - params.yaml
+    params:
+      - weights
+      - data
+      - epochs
+      - batch
+      - name
+    outs:
+      - runs/train/${name}
+
+  evaluate:
+    cmd: python evaluate_run.py --run-name ${name} --data ${data} --out metrics/${name}.yaml
+    deps:
+      - evaluate_run.py
+      - params.yaml
+    params:
+      - data
+      - name
+    metrics:
+      - metrics/${name}.yaml

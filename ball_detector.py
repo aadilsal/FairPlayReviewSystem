@@ -2,16 +2,28 @@ import cv2
 from yolo_detect import YOLOBallDetector
 from ball_tracker import ball_detect
 from cvzone.ColorModule import ColorFinder
+import os
 
-# Initialize detectors once
-yolo_detector = YOLOBallDetector('outputs/yolov8_cricket_ball2/weights/best.pt')  # or your custom weights
+# Initialize detectors once but allow runtime weight replacement
+_yolo_detector = None
+def get_yolo_detector(weights_path=None):
+    global _yolo_detector
+    if _yolo_detector is None:
+        # prefer provided path, else default (wrapped in YOLOBallDetector)
+        weights = weights_path if weights_path is not None else 'outputs/yolov8_cricket_ball2/weights/best.pt'
+        _yolo_detector = YOLOBallDetector(weights)
+    elif weights_path is not None and os.path.exists(weights_path) and weights_path != _yolo_detector.model_path:
+        _yolo_detector.load_weights(weights_path)
+    return _yolo_detector
+
+
 color_finder = ColorFinder(False)
 hsv_vals = {
     "hmin": 10, "smin": 44, "vmin": 192,
     "hmax": 125, "smax": 114, "vmax": 255,
 }
 
-def detect_ball_on_frame(frame):
+def detect_ball_on_frame(frame, yolo_weights=None):
     """
     Draw ball detection (YOLO or color-based) on top of the input frame.
     Returns (frame_with_ball, detected:bool)
@@ -20,7 +32,8 @@ def detect_ball_on_frame(frame):
     found = False
 
     # Try YOLO detection with size/aspect filtering
-    yolo_detections = yolo_detector.detect(frame)
+    detector = get_yolo_detector(yolo_weights)
+    yolo_detections = detector.detect(frame)
     filtered = []
     for (x, y, w, h, confidence) in yolo_detections:
         aspect = w / h if h > 0 else 0
