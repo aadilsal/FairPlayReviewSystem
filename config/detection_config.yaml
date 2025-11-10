@@ -1,0 +1,29 @@
+model:
+  weights_path: "weights.pt"
+  device: "cpu"
+  imgsz: 640
+
+preprocessing:
+  enabled: true
+  ball_color: "white"
+  deblur: true
+  sharpen: true
+  clahe: true
+  blur_threshold: 100.0
+
+detection:
+  conf_threshold: 0.25
+  iou_threshold: 0.45
+  imgsz: 640
+  min_area: 100
+  max_area: 3000
+  aspect_ratio_min: 0.7
+  aspect_ratio_max: 1.3
+
+tracking:
+  enabled: false
+  max_age: 30
+
+logging:
+  level: INFO
+  file: detection.log

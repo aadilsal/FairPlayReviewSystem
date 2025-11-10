@@ -1,5 +1,6 @@
 import cv2
 import os
+import logging
 
 # HSV values for cricket ball (customize as needed)
 hsv_vals = {
@@ -215,6 +216,16 @@ def process_folder(folder_path, output_dir, fps):
 
 
 def main():
+    # Configure logging for the pipeline
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('detection.log'),
+            logging.StreamHandler()
+        ]
+    )
+
     parser = argparse.ArgumentParser(description='Run FairPlayReviewSystem pipeline')
     parser.add_argument('--input', '-i', required=True,
                         help='Path to input video file or folder containing videos')
