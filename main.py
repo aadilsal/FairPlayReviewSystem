@@ -1,5 +1,6 @@
 import cv2
 import os
+import time
 
 # HSV values for cricket ball (customize as needed)
 hsv_vals = {
@@ -10,27 +11,17 @@ hsv_vals = {
     "smax": 114,
     "vmax": 255,
 }
-from person_detector import detect_persons
-from pose_estimator import estimate_pose
+from detection.person_detector import detect_persons
+from detection.pose_detector import estimate_pose
 
 def extract_video_frames(video_path, output_frames_folder, target_fps=30):
+    """Convenience wrapper that delegates to the pipeline extractor.
+
+    Keeps the original function name for backwards compatibility while using
+    the refactored `pipeline.preprocessing.extract_video_frames` implementation.
     """
-    Extract frames from a video at the specified FPS.
-    Only extracts if frames don't already exist.
-    Returns a list of frame paths.
-    """
-    video_name = os.path.splitext(os.path.basename(video_path))[0]
-    video_output_folder = os.path.join(output_frames_folder, video_name)
-    # --- CHECK: If frames already extracted, skip extraction ---
-    if os.path.exists(video_output_folder):
-        existing_frames = [f for f in os.listdir(video_output_folder) if f.lower().endswith('.jpg')]
-        if existing_frames:
-            print(f"Frames already exist for {video_name}, skipping extraction.")
-            return [os.path.join(video_output_folder, f) for f in sorted(existing_frames)]
-    os.makedirs(video_output_folder, exist_ok=True)
-    frame_paths = extract_frames(video_path, output_folder=video_output_folder, target_fps=target_fps)
-    print(f"Extracted {len(frame_paths)} frames from {video_name} to {video_output_folder}")
-    return frame_paths
+    from pipeline.preprocessing import extract_video_frames as _impl
+    return _impl(video_path, output_frames_folder, target_fps)
 
 def run_person_and_pose_detection_on_frames(frame_paths):
     """
@@ -77,12 +68,49 @@ class CricketBallTracker:
         self.detector = CricketBallDetector(yolo_model_path)
         self.results = []
 
+
+class CricketBallDetector:
+    """Small shim implementation to preserve main.py behavior.
+
+    This lightweight detector delegates to the refactored `detection.ball_detector`
+    YOLO wrapper when available. It intentionally avoids importing heavy
+    dependencies at module import time beyond what `detection.ball_detector`
+    itself imports.
+    """
+    def __init__(self, model_path='yolov8n.pt'):
+        try:
+            from detection.ball_detector import get_yolo_detector
+            self._detector = get_yolo_detector(model_path)
+        except Exception:
+            self._detector = None
+
+    def detect_ball(self, frame, method=None):
+        if self._detector is None:
+            return []
+        try:
+            # models.yolo_detect.YOLOBallDetector.detect returns list of (x,y,w,h,conf)
+            return self._detector.detect(frame)
+        except Exception:
+            return []
+
+    def visualize_detections(self, frame, detections):
+        out = frame.copy()
+        try:
+            import cv2
+            for d in detections:
+                if d and len(d) >= 4:
+                    x, y, w, h = d[0], d[1], d[2], d[3]
+                    cv2.rectangle(out, (int(x), int(y)), (int(x + w), int(y + h)), (0, 0, 255), 2)
+            return out
+        except Exception:
+            return frame
+
     def process_video(self, video_path, output_dir="outputs/video", 
                      frame_output_dir="outputs/frames", target_fps=10, 
                      methods=['color_optimized']):
         print(f"Processing video: {video_path}")
         print("Extracting frames...")
-        frame_paths = extract_frames(video_path, frame_output_dir, target_fps)
+        frame_paths = extract_video_frames(video_path, frame_output_dir, target_fps)
         print(f"Extracted {len(frame_paths)} frames")
         if not frame_paths:
             print("Error: No frames extracted from video")
@@ -102,9 +130,9 @@ class CricketBallTracker:
                 if frame is None:
                     print(f"Error: Could not load frame {frame_path}")
                     continue
-                
+
                 start_time = time.time()
-                
+
                 # Detect balls
                 detections = self.detector.detect_ball(frame, method=method)
                 processing_time = time.time() - start_time
@@ -191,9 +219,9 @@ class CricketBallTracker:
                 f.write("\n")
         print(f"Report saved to: {output_file}")
 import argparse
-from frame_extractor import extract_video_frames
-from detection_pipeline import process_frames_pipeline
-from video_utils import frames_to_video_with_custom_path
+from pipeline.preprocessing import extract_video_frames
+from pipeline.main_pipeline import process_frames_pipeline
+from pipeline.postprocessing import frames_to_video_with_custom_path
 
 
 def process_single_video(input_path, output_dir, fps):

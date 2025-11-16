@@ -33,6 +33,16 @@ Thumbs.db
 
 # Project outputs and artifacts
 
+# Local outputs and generated results
+outputs/
+
+# Local datasets (do not commit large datasets)
+cricket_ball_data/
+Cricket_Batsman_data/
+# Common typo/case variants
+cricket_ball_dat/
+Cricket_Batsman_Data/
+
 
 # Videos and large media
 test_videos/
