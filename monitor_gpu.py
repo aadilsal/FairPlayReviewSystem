@@ -54,4 +54,4 @@ def monitor_gpu(interval=2):
 
 
 if __name__ == "__main__":
-    monitor_gpu(interval=2)
+    monitor_gpu(interval=5)

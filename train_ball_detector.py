@@ -2,11 +2,15 @@ from ultralytics import YOLO
 import torch
 from pathlib import Path
 import shutil
+import os
+from datetime import datetime
 
 
 class BallDetectorTrainer:
     def __init__(self, data_yaml="cricket_ball_data/data.yaml"):
         self.data_yaml = data_yaml
+        # Repository root (ensure outputs go to this folder)
+        self.repo_root = Path(__file__).resolve().parent
         self.device = 0 if torch.cuda.is_available() else 'cpu'
         if self.device == 0:
             gpu_name = torch.cuda.get_device_name(0)
@@ -16,7 +20,7 @@ class BallDetectorTrainer:
             print("\n⚠️  WARNING: GPU not available, using CPU (very slow!)")
 
         self.training_config = {
-            'epochs': 200,
+            'epochs': 100,
             'imgsz': 640,
             'batch': 8,
             'device': self.device,
@@ -142,22 +146,45 @@ class BallDetectorTrainer:
         print("Loading YOLOv8 architecture...")
         model = YOLO(f'yolov8{model_size}.yaml')
 
+        # Ensure outputs are written into the repository on D: drive
+        project_dir = self.repo_root / 'runs'
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        name = f"detect_train_{model_size}_{timestamp}"
+
+        print(f"Project dir: {project_dir}")
+        print(f"Run name: {name}")
+
         print("Starting training from scratch...\n")
         try:
-            results = model.train(data=self.data_yaml, **self.training_config)
+            results = model.train(data=self.data_yaml, project=str(project_dir), name=name, **self.training_config)
 
             print(f"\n{'='*60}")
             print("✓ TRAINING COMPLETED SUCCESSFULLY!")
             print(f"{'='*60}\n")
 
             try:
-                best_weights = Path('runs/detect/train/weights/best.pt')
-                if best_weights.exists():
-                    weights_dir = Path('weights')
+                # Find best weights inside the project runs folder
+                best_weights = None
+                # First try files with 'best' in name
+                for p in project_dir.rglob('*.pt'):
+                    if 'best' in p.name.lower():
+                        best_weights = p
+                        break
+
+                # Fallback: take the most recently modified .pt file
+                if best_weights is None:
+                    pts = list(project_dir.rglob('*.pt'))
+                    if pts:
+                        best_weights = max(pts, key=lambda p: p.stat().st_mtime)
+
+                if best_weights and best_weights.exists():
+                    weights_dir = self.repo_root / 'weights'
                     weights_dir.mkdir(exist_ok=True)
-                    final_weights = weights_dir / 'ball_detector_best.pt'
+                    final_weights = weights_dir / f'ball_detector_best_{timestamp}.pt'
                     shutil.copy(best_weights, final_weights)
                     print(f"\n✓ Best weights saved to: {final_weights}")
+                else:
+                    print("Could not locate trained weights in project runs folder.")
             except Exception as e:
                 print(f"Could not copy best weights: {e}")
 
@@ -225,6 +252,14 @@ if __name__ == "__main__":
         print("\n⚠️  ERROR: GPU not detected!")
         print("Please install CUDA-enabled PyTorch first")
         sys.exit(1)
+
+    # Force working directory to repository root to ensure outputs go to D: drive
+    repo_root = Path(__file__).resolve().parent
+    try:
+        os.chdir(str(repo_root))
+        print(f"Working directory set to repo root: {repo_root}")
+    except Exception:
+        pass
 
     trainer = BallDetectorTrainer()
 
