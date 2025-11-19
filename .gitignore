@@ -43,6 +43,14 @@ Cricket_Batsman_data/
 cricket_ball_dat/
 Cricket_Batsman_Data/
 
+# Roboflow / exported dataset folders (contain images/labels) - ignore these
+# Folder name contains spaces; escape spaces with backslashes in .gitignore
+white\ ball\ detection.v1i.yolov8/
+
+# NOTE: We want to keep model weights tracked in the repository so they are pushed.
+# Ensure `weights/` is NOT ignored. This explicit un-ignore is a safeguard.
+!weights/
+!weights/**
 
 # Videos and large media
 test_videos/
