@@ -51,6 +51,10 @@ valid/
 # Folder name contains spaces; escape spaces with backslashes in .gitignore
 white\ ball\ detection.v1i.yolov8/
 
+# Large zip files (backup datasets)
+backup_ball_detection/white\ ball\ detection.v1i.yolov8.zip
+*.zip
+
 # NOTE: We want to keep model weights tracked in the repository so they are pushed.
 # Ensure `weights/` is NOT ignored. This explicit un-ignore is a safeguard.
 !weights/
