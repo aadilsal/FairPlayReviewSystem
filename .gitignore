@@ -42,6 +42,10 @@ Cricket_Batsman_data/
 # Common typo/case variants
 cricket_ball_dat/
 Cricket_Batsman_Data/
+runs/
+test/
+train/
+valid/
 
 # Roboflow / exported dataset folders (contain images/labels) - ignore these
 # Folder name contains spaces; escape spaces with backslashes in .gitignore

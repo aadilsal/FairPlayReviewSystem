@@ -21,3 +21,9 @@ WEIGHTS_DIR = os.path.join(REPO_ROOT, 'weights')
 YOLO_BALL_WEIGHTS = os.environ.get('YOLO_BALL_WEIGHTS', os.path.join(WEIGHTS_DIR, 'weights.pt'))
 BATSMAN_WEIGHTS = os.environ.get('BATSMAN_WEIGHTS', os.path.join(WEIGHTS_DIR, 'yolov8s.pt'))
 POSE_WEIGHTS = os.environ.get('POSE_WEIGHTS', os.path.join(WEIGHTS_DIR, 'yolov8s-pose.pt'))
+
+# Optional: per-color ball detector weights. These let you maintain separate
+# models for different ball appearances (e.g. white vs red). If not provided,
+# they fall back to `YOLO_BALL_WEIGHTS`.
+YOLO_BALL_WEIGHTS_WHITE = os.environ.get('YOLO_BALL_WEIGHTS_WHITE', os.path.join(WEIGHTS_DIR, 'ball_white.pt'))
+YOLO_BALL_WEIGHTS_RED = os.environ.get('YOLO_BALL_WEIGHTS_RED', os.path.join(WEIGHTS_DIR, 'ball_red.pt'))

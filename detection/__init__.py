@@ -1,8 +1,7 @@
 """Detection package: detectors and helpers."""
 
 __all__ = [
-    "ball_detector",
-    "ball_tracker",
+    # Ball detector/tracker removed. See `backup_ball_detection/` for backups.
     "person_detector",
     "pose_detector",
 ]

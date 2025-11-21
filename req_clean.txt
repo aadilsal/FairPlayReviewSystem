@@ -1,6 +1,0 @@
-ultralytics>=8.0.0
-pathlib2>=2.3.0
-argparse>=1.4.0
-fastapi>=0.95.0
-uvicorn[standard]>=0.20.0
-
