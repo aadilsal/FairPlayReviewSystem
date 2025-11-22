@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['cricket-ball']
+
+roboflow:
+  workspace: fyp-bd4aj
+  project: white-ball-detection-au1kj-8fev6
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/fyp-bd4aj/white-ball-detection-au1kj-8fev6/dataset/1

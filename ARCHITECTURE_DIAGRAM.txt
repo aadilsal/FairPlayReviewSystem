@@ -1,0 +1,289 @@
+# Motion Prediction System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         BALL DETECTION PIPELINE                          │
+│                       with Motion Prediction                             │
+└─────────────────────────────────────────────────────────────────────────┘
+
+INPUT: Video Frames
+   │
+   ├─► Frame 0 ─┐
+   ├─► Frame 1 ─┤
+   ├─► Frame 2 ─┤
+   ├─► Frame 3 ─┼─► YOLO Detection ─► Ball Bounding Boxes
+   ├─► Frame 4 ─┤                      │
+   ├─► ...      ─┤                      │
+   └─► Frame N ─┘                      │
+                                        ▼
+                            ┌────────────────────────┐
+                            │  Detection Records     │
+                            │  ┌──────────────────┐ │
+                            │  │ Frame 0: Ball ✓  │ │
+                            │  │ Frame 1: Ball ✓  │ │
+                            │  │ Frame 2: None ✗  │ │  ← Gaps detected!
+                            │  │ Frame 3: None ✗  │ │
+                            │  │ Frame 4: Ball ✓  │ │
+                            │  └──────────────────┘ │
+                            └────────────────────────┘
+                                        │
+                                        ▼
+                            ┌────────────────────────┐
+                            │   Gap Analysis         │
+                            │                        │
+                            │  Gap 1: Frames 2-3     │
+                            │  Size: 2 frames        │
+                            │  Action: Fill ✓        │
+                            └────────────────────────┘
+                                        │
+                    ┌───────────────────┴───────────────────┐
+                    │                                       │
+         Gap ≤ 3 frames                          Gap > 3 frames
+                    │                                       │
+                    ▼                                       ▼
+        ┌───────────────────────┐               ┌──────────────────────┐
+        │ Linear Interpolation  │               │  Kalman Filtering    │
+        │                       │               │                      │
+        │  Frame 2:             │               │  State: [x,y,vx,vy] │
+        │    x = x₁ + 0.5·Δx   │               │  Predict next state  │
+        │    y = y₁ + 0.5·Δy   │               │  Smooth trajectory   │
+        │                       │               │                      │
+        │  Fast, Simple         │               │  Accurate, Physics   │
+        └───────────────────────┘               └──────────────────────┘
+                    │                                       │
+                    └───────────────────┬───────────────────┘
+                                        ▼
+                            ┌────────────────────────┐
+                            │  Predicted Detections  │
+                            │                        │
+                            │  Frame 2: Ball (pred)  │
+                            │  Frame 3: Ball (pred)  │
+                            │  Confidence: 0.3       │
+                            └────────────────────────┘
+                                        │
+                                        ▼
+                            ┌────────────────────────┐
+                            │   Merge Results        │
+                            │                        │
+                            │  Frame 0: Ball ✓       │
+                            │  Frame 1: Ball ✓       │
+                            │  Frame 2: Ball ○ (new) │
+                            │  Frame 3: Ball ○ (new) │
+                            │  Frame 4: Ball ✓       │
+                            └────────────────────────┘
+                                        │
+                    ┌───────────────────┴───────────────────┐
+                    │                                       │
+                    ▼                                       ▼
+        ┌───────────────────────┐               ┌──────────────────────┐
+        │   CSV Output          │               │  Annotated Images    │
+        │                       │               │                      │
+        │ frame,x,y,w,h,conf,   │               │  ┌────────────────┐ │
+        │ type                  │               │  │  ╔══════╗      │ │
+        │ 0,100,200,50,50,      │               │  │  ║ Ball ║ ✓    │ │
+        │ 0.9,detected          │               │  │  ╚══════╝      │ │
+        │ 2,110,210,50,50,      │               │  │                │ │
+        │ 0.3,predicted         │               │  │  ┌──────┐      │ │
+        │                       │               │  │  │ Ball │ ○    │ │
+        │                       │               │  │  └──────┘      │ │
+        │                       │               │  └────────────────┘ │
+        │                       │               │  Green = Detected   │
+        │                       │               │  Yellow = Predicted │
+        └───────────────────────┘               └──────────────────────┘
+
+Legend:
+  ✓ = Actual YOLO detection
+  ○ = Motion prediction
+  ✗ = Missing detection (gap)
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SYSTEM COMPONENTS OVERVIEW                            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────┐
+│  BallTracker       │  Main tracker class
+│                    │
+│  - update()        │  Feed detections frame by frame
+│  - fill_gaps()     │  Fill missing detections
+│  - get_all()       │  Retrieve complete timeline
+└────────────────────┘
+
+┌────────────────────┐
+│  KalmanFilter      │  Motion model (optional)
+│                    │
+│  - State: [x,y,    │  Position + velocity
+│            vx,vy]  │
+│  - predict()       │  Predict next position
+│  - update()        │  Correct with measurement
+└────────────────────┘
+
+┌────────────────────┐
+│  detect_balls()    │  Main detection function
+│                    │
+│  + motion params   │  enable_motion_prediction
+│                    │  max_gap_frames
+│                    │  prediction_confidence
+│                    │  use_kalman
+└────────────────────┘
+
+┌────────────────────┐
+│  Configuration     │  Presets & settings
+│                    │
+│  - conservative    │  Max 2 frames, no Kalman
+│  - balanced        │  Max 5 frames, no Kalman
+│  - aggressive      │  Max 10 frames, Kalman
+│  - high_quality    │  Max 8 frames, tuned Kalman
+└────────────────────┘
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      MOTION PREDICTION FLOW                              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Frame Timeline:
+─────────────────────────────────────────────────────────────────►
+0     1     2     3     4     5     6     7     8     9     10
+│     │     │     │     │     │     │     │     │     │     │
+✓     ✓     ✗     ✗     ✓     ✓     ✗     ✓     ✗     ✗     ✓
+
+After Gap Analysis:
+─────────────────────────────────────────────────────────────────►
+0     1     2     3     4     5     6     7     8     9     10
+│     │     │     │     │     │     │     │     │     │     │
+✓     ✓     ○     ○     ✓     ✓     ○     ✓     ○     ○     ✓
+      └─────┴─────┘                 │           └─────┴─────┘
+       Gap: 2 frames                │            Gap: 2 frames
+       Linear interp.              Single        Linear interp.
+                                   frame
+                                   Linear interp.
+
+✓ = Detected (green box, high confidence)
+○ = Predicted (yellow box, low confidence)
+✗ = Missing (gap)
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    LINEAR INTERPOLATION EXAMPLE                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Frame 1 (detected):                Frame 4 (detected):
+┌─────────────────┐                ┌─────────────────┐
+│                 │                │                 │
+│  ╔═══╗          │                │       ╔═══╗     │
+│  ║ B ║          │                │       ║ B ║     │
+│  ╚═══╝          │                │       ╚═══╝     │
+│  (100, 200)     │                │       (130, 230)│
+└─────────────────┘                └─────────────────┘
+
+Frames 2-3 (predicted by interpolation):
+                   t=1/3                    t=2/3
+┌─────────────────┐         ┌─────────────────┐
+│                 │         │                 │
+│    ┌───┐        │         │         ┌───┐   │
+│    │ B │        │         │         │ B │   │
+│    └───┘        │         │         └───┘   │
+│    (110, 210)   │         │         (120, 220)
+└─────────────────┘         └─────────────────┘
+  Frame 2 (pred)              Frame 3 (pred)
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     KALMAN FILTER VISUALIZATION                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Motion Model: Constant Velocity
+─────────────────────────────────
+
+State Vector:          Prediction:           Update:
+┌────┐                ┌────┐                ┌────┐
+│ x  │                │ x' │  = F·x         │ x  │  = x' + K·y
+│ y  │                │ y' │                │ y  │
+│ vx │                │ vx'│                │ vx │
+│ vy │                │ vy'│                │ vy │
+└────┘                └────┘                └────┘
+
+  │                      │                      │
+  │                      │                      │
+  ▼                      ▼                      ▼
+Observed             Predicted              Corrected
+Position             Position               Estimate
+
+
+Trajectory Smoothing:
+─────────────────────
+
+Without Kalman (Linear):     With Kalman (Smooth):
+    ●─────●                      ●─────●
+   /       \                    /       ╲
+  ●    ○    ●                  ●    ○    ●
+       |                            │
+    Straight                    Curved
+    prediction                  prediction
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    PERFORMANCE CHARACTERISTICS                           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Method          Speed    Accuracy   Best For
+─────────────────────────────────────────────────────────────
+Linear         ████████  ████░░░░   Gaps ≤ 3 frames
+Interpolation  (fast)    (good)     Constant velocity
+
+Kalman         ████░░░░  ████████   Gaps ≥ 4 frames
+Filter         (slower)  (excellent) Variable motion
+
+
+Gap Size vs Accuracy:
+─────────────────────
+
+Accuracy
+100% │
+     │ ●●●
+     │    ●●
+ 75% │      ●●              Linear Interpolation
+     │        ●●
+     │          ●●
+ 50% │            ●●━━━━━━━━━━━━━━●●
+     │              ╱╲
+     │             ╱  ╲          Kalman Filter
+ 25% │            ╱    ╲
+     │           ╱      ╲
+  0% └──────────┴────────┴────────────►
+     0    2    4    6    8    10    Gap Size (frames)
+
+         ↑              ↑
+    Recommended    Max recommended
+    for linear     for Kalman
+
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           API QUICK REFERENCE                            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+# Main Function
+detect_balls(
+    frames_dir='...',
+    model_path='...',
+    enable_motion_prediction=True,  ◄─ Enable feature
+    max_gap_frames=5,                ◄─ Max gap size
+    prediction_confidence=0.3,       ◄─ Confidence for predictions
+    use_kalman=False,                ◄─ Use Kalman filter
+)
+
+# Tracker Class
+tracker = BallTracker(max_gap_frames=5, use_kalman=False)
+tracker.update(frame_idx, detection)  ◄─ Feed detections
+tracker.fill_gaps()                   ◄─ Fill missing frames
+detections = tracker.get_all_detections()  ◄─ Get results
+
+# Helper Functions
+fill_detection_gaps(detections, max_gap_frames=5)  ◄─ Post-process
+filter_ball_detections(detections, 'sports ball')  ◄─ Filter by class
+group_detections_by_frame(detections)              ◄─ Group by frame
+
+# Presets
+config = get_config('balanced')  ◄─ Get preset configuration
+detect_balls(..., **config)      ◄─ Apply preset
+```

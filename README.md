@@ -12,8 +12,27 @@ A simple pipeline to detect and visualize a cricket ball in images or videos usi
   - person detection + exoskeletan
   - frame extraction
   - detection pipeline made of the existing models
-  
+  - **Motion prediction for handling missed ball detections** ✨ NEW
+    - Linear interpolation for short gaps (1-3 frames)
+    - Kalman filtering for longer gaps (4+ frames)
+    - Visual distinction (yellow boxes for predictions)
+    - See [MOTION_PREDICTION.md](MOTION_PREDICTION.md) for details
 
+- Python 3.9+ (recommended)
+- Windows, macOS, or Linux
+- GPU optional (CUDA recommended for speed)
+
+  ### work done so far
+
+  - ball detection
+  - person detection + exoskeletan
+  - frame extraction
+  - detection pipeline made of the existing models
+  - **Motion prediction for handling missed ball detections** ✨ NEW
+    - Linear interpolation for short gaps (1-3 frames)
+    - Kalman filtering for longer gaps (4+ frames)
+    - Visual distinction (yellow boxes for predictions)
+    - See [MOTION_PREDICTION.md](MOTION_PREDICTION.md) for details
 
 ### Setup
 
@@ -37,8 +56,25 @@ pip install -r requirements.txt
 ### Quick Start
 
 ```bash
-python main.py -i test_videos/vid1.mp4 -m yolo_direct --fps 2
+# Basic usage (motion prediction enabled by default)
+python main.py -i test_videos/vid1.mp4 -o outputs
+
+# With different motion prediction presets
+python main.py -i test_videos/vid1.mp4 --motion-preset aggressive
+python main.py -i test_videos/vid1.mp4 --motion-preset conservative
+
+# Disable motion prediction (original behavior)
+python main.py -i test_videos/vid1.mp4 --no-motion-prediction
 ```
+
+**Motion Prediction Presets:**
+
+- `balanced` (default) - Good for most videos
+- `conservative` - High precision, fewer predictions
+- `aggressive` - Fill larger gaps, use Kalman filtering
+- `high_quality` - Best predictions, smoothest trajectories
+
+See [PIPELINE_INTEGRATION.md](PIPELINE_INTEGRATION.md) for complete usage guide.
 
 ````bash
 ## Cricket Ball Detection – YOLOv8 + Color-Based Fallback
