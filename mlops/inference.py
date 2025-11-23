@@ -1,0 +1,145 @@
+import time
+import json
+from pathlib import Path
+from typing import Dict, Any
+import logging
+import mlflow
+import numpy as np
+import tensorflow as tf
+
+from .config import load_config
+from .video_processor import VideoProcessor
+from .model_manager import ModelManager
+from .utils import save_json, ensure_dir
+
+logger = logging.getLogger(__name__)
+
+
+def run_inference(video_path: Path) -> Dict[str, Any]:
+    """
+    Run complete inference pipeline on a video.
+    
+    Args:
+        video_path: Path to uploaded video file
+    
+    Returns:
+        Dictionary with status, predictions, and metadata
+    """
+    logger.info("  📹 INFERENCE PIPELINE STARTED")
+    logger.info(f"  📂 Video: {video_path.name}")
+    
+    cfg = load_config()
+    ensure_dir(cfg.results_dir)
+
+    # Validate video
+    logger.info("  🔍 Step 1: Validating video...")
+    vp = VideoProcessor()
+    ok, reason = vp.validate_video(video_path)
+    if not ok:
+        logger.error(f"  ❌ Video validation failed: {reason}")
+        return {"status": "error", "message": f"video_invalid:{reason}"}
+    logger.info("  ✓ Video validated")
+
+    # Load model
+    logger.info("  🤖 Step 2: Loading model from MLflow...")
+    mm = ModelManager(cfg.mlflow_tracking_uri, cfg.mlflow_username, cfg.mlflow_password)
+
+    start = time.time()
+    
+    try:
+        model = mm.get_model(cfg.model_run_id)
+        logger.info("  ✓ Model loaded successfully")
+    except Exception as e:
+        logger.error(f"  ❌ Model loading failed: {e}")
+        return {"status": "error", "message": f"model_load_failed:{e}"}
+
+    # Extract and preprocess frames
+    logger.info("  🎞️  Step 3: Extracting frames...")
+    frames = []
+    frame_count = 0
+    for f in vp.extract_frames(video_path):
+        frames.append(vp.preprocess(f))
+        frame_count += 1
+        if frame_count >= 30:  # Limit frames for demo
+            break
+
+    if len(frames) == 0:
+        logger.error("  ❌ No frames extracted from video")
+        return {"status": "error", "message": "no_frames_extracted"}
+    
+    logger.info(f"  ✓ Extracted {len(frames)} frames")
+
+    # Run inference on frames
+    logger.info("  🔮 Step 4: Running object detection...")
+    all_detections = []
+    try:
+        for idx, frame in enumerate(frames):
+            # TensorFlow Hub models expect uint8 input
+            input_tensor = tf.convert_to_tensor(frame * 255, dtype=tf.uint8)
+            input_tensor = tf.expand_dims(input_tensor, 0)
+            
+            # Run detection
+            detections = model(input_tensor)
+            
+            # Extract detection results
+            detection_result = {
+                "frame": idx,
+                "num_detections": int(detections["num_detections"][0]),
+                "detection_boxes": detections["detection_boxes"][0].numpy()[:5].tolist(),  # Top 5
+                "detection_scores": detections["detection_scores"][0].numpy()[:5].tolist(),
+                "detection_classes": detections["detection_classes"][0].numpy()[:5].tolist(),
+            }
+            all_detections.append(detection_result)
+            
+            if (idx + 1) % 10 == 0:
+                logger.info(f"  ⏳ Processed {idx + 1}/{len(frames)} frames...")
+                
+        logger.info(f"  ✓ Completed detection on all {len(frames)} frames")
+    except Exception as e:
+        logger.error(f"  ❌ Inference failed: {e}")
+        return {"status": "error", "message": f"inference_failed:{e}"}
+
+    inference_time = time.time() - start
+    logger.info(f"  ⏱️  Total inference time: {inference_time:.2f}s")
+
+    # Log run to mlflow
+    logger.info("  📊 Step 5: Logging to MLflow...")
+    run_id = None
+    out_path = None
+    try:
+        mlflow.set_tracking_uri(cfg.mlflow_tracking_uri or mlflow.get_tracking_uri())
+        with mlflow.start_run() as run:
+            run_id = run.info.run_id
+            logger.info(f"  📝 MLflow Run ID: {run_id}")
+            
+            mlflow.log_param("model_version", cfg.model_version)
+            mlflow.log_param("video_path", str(video_path))
+            mlflow.log_param("frames_processed", len(frames))
+            mlflow.log_metric("inference_time", inference_time)
+            mlflow.log_metric("avg_time_per_frame", inference_time / len(frames))
+            logger.info("  ✓ Logged parameters and metrics")
+
+            results = {
+                "detections": all_detections,
+                "total_frames": len(frames),
+                "inference_time": inference_time,
+            }
+
+            out_path = cfg.results_dir / f"results_{run_id}.json"
+            save_json(results, out_path)
+            mlflow.log_artifact(str(out_path), artifact_path="results")
+            logger.info(f"  ✓ Saved results to: {out_path.name}")
+            logger.info("  ✓ Uploaded artifacts to MLflow")
+    except Exception as e:
+        logger.warning(f"  ⚠️  MLflow logging failed: {e}")
+        # non-fatal: continue returning results even if logging fails
+
+    return {
+        "status": "success",
+        "run_id": run_id,
+        "predictions": all_detections[:3],  # Return first 3 frames
+        "total_detections": len(all_detections),
+        "frames_processed": len(frames),
+        "inference_time": round(inference_time, 2),
+        "result_file": str(out_path.relative_to(Path.cwd())) if out_path else None,
+    }
