@@ -101,14 +101,62 @@ def main():
                     st.metric("🎞️ Frames", data.get('frames_processed', 0))
                 with col3:
                     st.metric("🔍 Detections", data.get('total_detections', 0))
-                
+
                 st.write("**📝 MLflow Run ID:**", data.get("run_id"))
+
+                # Play the uploaded video
+                st.subheader("🎬 Uploaded Video")
+                st.video(uploaded)
 
                 preds = data.get("predictions")
                 if preds is not None:
-                    st.subheader("🎯 Detection Results")
-                    st.json(preds)
-                    log(f"Displayed {len(preds)} detection results")
+                    st.subheader("✅ Frames with Detections")
+                    detected_frames = [p for p in preds if p.get("num_detections", 0) > 0]
+                    if not detected_frames:
+                        st.info("No detections found in any frame.")
+                    else:
+                        st.write(f"{len(detected_frames)} frames with detections:")
+                        for pred in detected_frames:
+                            st.write(f"**Frame {pred['frame']}** — {pred['num_detections']} detections")
+                            for det in pred["detections"]:
+                                st.write(f"- Class: {det['class_name']}, Confidence: {det['confidence']:.2f}, BBox: {det['bbox']}")
+
+                        # Advanced: Show images with bounding boxes
+                        import cv2
+                        import numpy as np
+                        st.subheader("🖼️ Detection Visualizations")
+                        # Save uploaded video to temp file
+                        import tempfile
+                        temp_video = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+                        temp_video.write(uploaded.getvalue())
+                        temp_video.close()
+                        # Extract frames using OpenCV
+                        cap = cv2.VideoCapture(temp_video.name)
+                        frame_idx = 0
+                        frame_map = {p['frame']: p for p in detected_frames}
+                        shown = 0
+                        while cap.isOpened():
+                            ret, frame = cap.read()
+                            if not ret:
+                                break
+                            if frame_idx in frame_map:
+                                pred = frame_map[frame_idx]
+                                # Draw detections
+                                for det in pred["detections"]:
+                                    x1, y1, x2, y2 = map(int, det["bbox"])
+                                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
+                                    label = f"{det['class_name']} {det['confidence']:.2f}"
+                                    cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+                                # Convert BGR to RGB
+                                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                                st.image(frame_rgb, caption=f"Frame {frame_idx} — {pred['num_detections']} detections", use_column_width=True)
+                                shown += 1
+                            frame_idx += 1
+                            if shown >= 10:
+                                break
+                        cap.release()
+
+                    log(f"Displayed {len(detected_frames)} detection results")
 
                 if data.get("result_file"):
                     res_path = data['result_file']

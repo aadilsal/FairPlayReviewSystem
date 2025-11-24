@@ -1,0 +1,169 @@
+{
+  "detections": [
+    {
+      "frame": 0,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 1,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 2,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 3,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 4,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 5,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 6,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 7,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 8,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 9,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 10,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 11,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 12,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 13,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 14,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 15,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 16,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 17,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 18,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 19,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 20,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 21,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 22,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 23,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 24,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 25,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 26,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 27,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 28,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 29,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            458.8791198730469,
+            333.6629333496094,
+            507.2398376464844,
+            382.8020935058594
+          ],
+          "confidence": 0.777,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    }
+  ],
+  "total_frames": 30,
+  "total_objects": 1,
+  "inference_time": 13.270368576049805
+}

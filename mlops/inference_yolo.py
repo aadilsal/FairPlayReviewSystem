@@ -1,3 +1,4 @@
+"""YOLO-based inference pipeline for cricket video analysis."""
 import time
 import json
 from pathlib import Path
@@ -5,11 +6,11 @@ from typing import Dict, Any
 import logging
 import mlflow
 import numpy as np
-import tensorflow as tf
+import cv2
 
 from .config import load_config
 from .video_processor import VideoProcessor
-from .model_manager import ModelManager
+from .model_manager_yolo import YOLOModelManager
 from .utils import save_json, ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def run_inference(video_path: Path) -> Dict[str, Any]:
     """
-    Run complete inference pipeline on a video.
+    Run complete YOLO inference pipeline on a video.
     
     Args:
         video_path: Path to uploaded video file
@@ -40,15 +41,15 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
         return {"status": "error", "message": f"video_invalid:{reason}"}
     logger.info("  ✓ Video validated")
 
-    # Load model
-    logger.info("  🤖 Step 2: Loading model from MLflow...")
-    mm = ModelManager(cfg.mlflow_tracking_uri, cfg.mlflow_username, cfg.mlflow_password)
+    # Load YOLO model
+    logger.info("  🤖 Step 2: Loading YOLO model from MLflow...")
+    mm = YOLOModelManager(cfg.mlflow_tracking_uri, cfg.mlflow_username, cfg.mlflow_password)
 
     start = time.time()
     
     try:
         model = mm.get_model(cfg.model_run_id)
-        logger.info("  ✓ Model loaded successfully")
+        logger.info("  ✓ YOLO model loaded successfully")
     except Exception as e:
         logger.error(f"  ❌ Model loading failed: {e}")
         return {"status": "error", "message": f"model_load_failed:{e}"}
@@ -58,7 +59,7 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
     frames = []
     frame_count = 0
     for f in vp.extract_frames(video_path):
-        frames.append(vp.preprocess(f))
+        frames.append(f)  # Keep original format for YOLO
         frame_count += 1
         if frame_count >= 30:  # Limit frames for demo
             break
@@ -69,62 +70,41 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
     
     logger.info(f"  ✓ Extracted {len(frames)} frames")
 
-    # Run inference on frames
-    logger.info("  🔮 Step 4: Running object detection...")
+    # Run YOLO inference on frames
+    logger.info("  🔮 Step 4: Running YOLO object detection...")
     all_detections = []
+    
     try:
         for idx, frame in enumerate(frames):
-            # TensorFlow Hub models expect uint8 input
-            input_tensor = tf.convert_to_tensor(frame * 255, dtype=tf.uint8)
-            input_tensor = tf.expand_dims(input_tensor, 0)
+            # Convert frame back to BGR for YOLO (it expects BGR from OpenCV)
+            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             
-            # Run detection
-            detections = model(input_tensor)
-            
-            # Debug output format on first frame
-            if idx == 0:
-                logger.info(f"  🔍 Model output type: {type(detections)}")
-                if hasattr(detections, 'keys'):
-                    logger.info(f"  🔍 Output keys: {list(detections.keys())}")
-                elif isinstance(detections, tuple):
-                    logger.info(f"  🔍 Tuple length: {len(detections)}")
-            
-            # Handle TensorFlow Hub EfficientDet output format
-            # The model returns a dict-like object, but we need to handle it carefully
-            if isinstance(detections, dict):
-                # Standard dict access
-                num_detections = int(detections["num_detections"][0])
-                detection_boxes = detections["detection_boxes"][0].numpy()[:5].tolist()
-                detection_scores = detections["detection_scores"][0].numpy()[:5].tolist()
-                detection_classes = detections["detection_classes"][0].numpy()[:5].tolist()
-            else:
-                # Handle tuple or other output formats
-                # Convert to dict if needed
-                try:
-                    # Try accessing as attributes (common in TF Hub models)
-                    num_detections = int(detections.numpy()[0]) if hasattr(detections, 'numpy') else len(detections)
-                    # For tuple output: (boxes, classes, scores, num_detections)
-                    if isinstance(detections, tuple) and len(detections) >= 4:
-                        detection_boxes = detections[0][0].numpy()[:5].tolist()
-                        detection_classes = detections[1][0].numpy()[:5].tolist()
-                        detection_scores = detections[2][0].numpy()[:5].tolist()
-                        num_detections = int(detections[3][0])
-                    else:
-                        raise ValueError(f"Unexpected detection output format: {type(detections)}")
-                except Exception as e:
-                    logger.error(f"  ❌ Failed to parse detection output: {e}")
-                    logger.error(f"  🔍 Detection type: {type(detections)}")
-                    if hasattr(detections, 'keys'):
-                        logger.error(f"  🔍 Available keys: {list(detections.keys())}")
-                    raise
+            # Run YOLO detection
+            results = model(frame_bgr, conf=0.25, iou=0.45, verbose=False, device=cfg.device)
             
             # Extract detection results
+            frame_detections = []
+            for result in results:
+                boxes = result.boxes
+                if boxes is not None:
+                    for box in boxes:
+                        # Get box coordinates (xyxy format)
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        conf = float(box.conf[0].cpu().numpy())
+                        cls = int(box.cls[0].cpu().numpy())
+                        cls_name = model.names[cls] if hasattr(model, 'names') else str(cls)
+                        
+                        frame_detections.append({
+                            "bbox": [float(x1), float(y1), float(x2), float(y2)],
+                            "confidence": round(conf, 3),
+                            "class_id": cls,
+                            "class_name": cls_name
+                        })
+            
             detection_result = {
                 "frame": idx,
-                "num_detections": num_detections,
-                "detection_boxes": detection_boxes,
-                "detection_scores": detection_scores,
-                "detection_classes": detection_classes,
+                "num_detections": len(frame_detections),
+                "detections": frame_detections[:10]  # Limit to top 10 per frame
             }
             all_detections.append(detection_result)
             
@@ -134,10 +114,16 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
         logger.info(f"  ✓ Completed detection on all {len(frames)} frames")
     except Exception as e:
         logger.error(f"  ❌ Inference failed: {e}")
+        import traceback
+        logger.error(f"  Traceback: {traceback.format_exc()}")
         return {"status": "error", "message": f"inference_failed:{e}"}
 
     inference_time = time.time() - start
     logger.info(f"  ⏱️  Total inference time: {inference_time:.2f}s")
+
+    # Count total detections
+    total_objects = sum(d["num_detections"] for d in all_detections)
+    logger.info(f"  📊 Total objects detected: {total_objects}")
 
     # Log run to mlflow
     logger.info("  📊 Step 5: Logging to MLflow...")
@@ -152,13 +138,16 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
             mlflow.log_param("model_version", cfg.model_version)
             mlflow.log_param("video_path", str(video_path))
             mlflow.log_param("frames_processed", len(frames))
+            mlflow.log_param("framework", "ultralytics_yolo")
             mlflow.log_metric("inference_time", inference_time)
             mlflow.log_metric("avg_time_per_frame", inference_time / len(frames))
+            mlflow.log_metric("total_detections", total_objects)
             logger.info("  ✓ Logged parameters and metrics")
 
             results = {
                 "detections": all_detections,
                 "total_frames": len(frames),
+                "total_objects": total_objects,
                 "inference_time": inference_time,
             }
 
@@ -175,8 +164,8 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
         "status": "success",
         "run_id": run_id,
         "predictions": all_detections[:3],  # Return first 3 frames
-        "total_detections": len(all_detections),
+        "total_detections": total_objects,
         "frames_processed": len(frames),
         "inference_time": round(inference_time, 2),
-        "result_file": str(out_path.relative_to(Path.cwd())) if out_path else None,
+        "result_file": out_path.name if out_path else None,
     }

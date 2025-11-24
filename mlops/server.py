@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from mlops.config import load_config
-from mlops.inference import run_inference
+from mlops.inference_yolo import run_inference  # Use YOLO inference
 from mlops.utils import allowed_file
 
 # Configure logging
