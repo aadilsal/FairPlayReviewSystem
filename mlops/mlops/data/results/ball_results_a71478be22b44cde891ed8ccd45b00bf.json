@@ -1,0 +1,18 @@
+{
+  "ball_detections": [
+    {
+      "bbox": [
+        458.8791198730469,
+        333.6629333496094,
+        507.2398376464844,
+        382.8020935058594
+      ],
+      "confidence": 0.777,
+      "class_id": 0,
+      "class_name": "cricket-ball",
+      "frame": 29
+    }
+  ],
+  "total_ball_detections": 1,
+  "model_run_id": "a71478be22b44cde891ed8ccd45b00bf"
+}

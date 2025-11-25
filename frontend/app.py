@@ -108,20 +108,29 @@ def main():
                 st.subheader("🎬 Uploaded Video")
                 st.video(uploaded)
 
+                # Prefer the more detailed preview fields if provided by backend
+                preds_preview = data.get("predictions_preview")
                 preds = data.get("predictions")
-                if preds is not None:
-                    st.subheader("✅ Frames with Detections")
-                    detected_frames = [p for p in preds if p.get("num_detections", 0) > 0]
-                    if not detected_frames:
-                        st.info("No detections found in any frame.")
-                    else:
-                        st.write(f"{len(detected_frames)} frames with detections:")
-                        for pred in detected_frames:
-                            st.write(f"**Frame {pred['frame']}** — {pred['num_detections']} detections")
-                            for det in pred["detections"]:
-                                st.write(f"- Class: {det['class_name']}, Confidence: {det['confidence']:.2f}, BBox: {det['bbox']}")
+                frames_with_detections = data.get("frames_with_detections")
 
-                        # Advanced: Show images with bounding boxes
+                # Build detected_frames: try preview, then predictions, else show indices from frames_with_detections
+                detected_frames = None
+                if preds_preview:
+                    detected_frames = preds_preview
+                elif preds:
+                    # backwards-compatible: predictions may only contain first N frames
+                    detected_frames = [p for p in preds if p.get("num_detections", 0) > 0]
+
+                st.subheader("✅ Frames with Detections")
+                if detected_frames and len(detected_frames) > 0:
+                    st.write(f"{len(detected_frames)} frames with detections:")
+                    for pred in detected_frames:
+                        st.write(f"**Frame {pred['frame']}** — {pred['num_detections']} detections")
+                        for det in pred.get("detections", []):
+                            st.write(f"- Class: {det.get('class_name')}, Confidence: {det.get('confidence', 0):.2f}, BBox: {det.get('bbox')}")
+
+                    # Advanced: Show images with bounding boxes when detection details are available
+                    try:
                         import cv2
                         import numpy as np
                         st.subheader("🖼️ Detection Visualizations")
@@ -142,21 +151,32 @@ def main():
                             if frame_idx in frame_map:
                                 pred = frame_map[frame_idx]
                                 # Draw detections
-                                for det in pred["detections"]:
-                                    x1, y1, x2, y2 = map(int, det["bbox"])
-                                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
-                                    label = f"{det['class_name']} {det['confidence']:.2f}"
-                                    cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+                                for det in pred.get("detections", []):
+                                    bbox = det.get("bbox") or []
+                                    if len(bbox) >= 4:
+                                        x1, y1, x2, y2 = map(int, bbox)
+                                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
+                                        label = f"{det.get('class_name')} {det.get('confidence', 0):.2f}"
+                                        cv2.putText(frame, label, (x1, max(0, y1-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
                                 # Convert BGR to RGB
                                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                                st.image(frame_rgb, caption=f"Frame {frame_idx} — {pred['num_detections']} detections", use_column_width=True)
+                                st.image(frame_rgb, caption=f"Frame {frame_idx} — {pred.get('num_detections', 0)} detections", use_column_width=True)
                                 shown += 1
                             frame_idx += 1
                             if shown >= 10:
                                 break
                         cap.release()
+                    except Exception as e:
+                        log(f"Failed to render detection visualizations: {e}", "WARNING")
 
                     log(f"Displayed {len(detected_frames)} detection results")
+                else:
+                    # No detailed detection objects available in the preview; fall back to indices
+                    if frames_with_detections:
+                        st.write(f"Detected in {len(frames_with_detections)} frames: {frames_with_detections}")
+                        st.info("Detection details not included in preview. Download the full results to inspect per-frame detections.")
+                    else:
+                        st.info("No detections found in any frame.")
 
                 if data.get("result_file"):
                     res_path = data['result_file']

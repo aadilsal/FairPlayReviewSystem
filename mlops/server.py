@@ -52,15 +52,27 @@ async def predict(file: UploadFile = File(...)):
     logger.info("✓ File type validated")
 
     # Save uploaded file
-    upload_path = cfg.upload_dir / filename
+    # Ensure the upload directory is present and resolved to an absolute path.
+    try:
+        upload_dir_abs = cfg.upload_dir.resolve()
+    except Exception:
+        upload_dir_abs = Path(cfg.upload_dir)
+
+    try:
+        upload_dir_abs.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"❌ Failed to create upload directory ({upload_dir_abs}): {e}")
+        raise HTTPException(status_code=500, detail=f"upload_dir_create_failed: {e}")
+
+    upload_path = upload_dir_abs / filename
     logger.info(f"💾 Saving to: {upload_path}")
-    
+
     try:
         with open(upload_path, "wb") as f:
             contents = await file.read()
             file_size_mb = len(contents) / (1024 * 1024)
             f.write(contents)
-        logger.info(f"✓ File saved ({file_size_mb:.2f} MB)")
+        logger.info(f"✓ File saved ({file_size_mb:.2f} MB) at {upload_path}")
     except Exception as e:
         logger.error(f"❌ Failed to save file: {e}")
         raise HTTPException(status_code=500, detail=f"file_save_failed: {e}")

@@ -1,0 +1,289 @@
+{
+  "detections": [
+    {
+      "frame": 0,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 1,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 2,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 3,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 4,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 5,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            675.7735595703125,
+            74.70965576171875,
+            711.1544189453125,
+            110.19801330566406
+          ],
+          "confidence": 0.444,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            677.99072265625,
+            74.73831939697266,
+            715.83349609375,
+            112.66988372802734
+          ],
+          "confidence": 0.41,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 7,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            681.4639892578125,
+            72.84136962890625,
+            720.0,
+            114.53160095214844
+          ],
+          "confidence": 0.365,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 9,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 10,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            695.6588134765625,
+            72.72999572753906,
+            720.0,
+            107.66920471191406
+          ],
+          "confidence": 0.279,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 11,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 12,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            215.06167602539062,
+            388.95648193359375,
+            254.08786010742188,
+            426.79962158203125
+          ],
+          "confidence": 0.739,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 13,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            230.0351104736328,
+            415.1243896484375,
+            269.33270263671875,
+            453.981689453125
+          ],
+          "confidence": 0.763,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 14,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            93.61630249023438,
+            914.4171142578125,
+            107.82992553710938,
+            927.6004638671875
+          ],
+          "confidence": 0.542,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 15,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            90.82656860351562,
+            934.4583740234375,
+            103.13497924804688,
+            945.6153564453125
+          ],
+          "confidence": 0.439,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 16,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 17,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 18,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 19,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            320.70550537109375,
+            238.54205322265625,
+            357.20916748046875,
+            272.833251953125
+          ],
+          "confidence": 0.44,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 20,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 21,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            554.8525390625,
+            182.4174041748047,
+            596.891357421875,
+            223.18275451660156
+          ],
+          "confidence": 0.266,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 22,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 23,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 24,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 25,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            591.41064453125,
+            265.69049072265625,
+            637.484375,
+            310.46673583984375
+          ],
+          "confidence": 0.444,
+          "class_id": 0,
+          "class_name": "cricket-ball"
+        }
+      ]
+    },
+    {
+      "frame": 26,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 27,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 28,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame": 29,
+      "num_detections": 0,
+      "detections": []
+    }
+  ],
+  "total_frames": 30,
+  "total_objects": 11,
+  "inference_time": 20.254335165023804
+}

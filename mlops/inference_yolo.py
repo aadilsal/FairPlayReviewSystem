@@ -129,6 +129,7 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
     logger.info("  📊 Step 5: Logging to MLflow...")
     run_id = None
     out_path = None
+    ball_out_path = None
     try:
         mlflow.set_tracking_uri(cfg.mlflow_tracking_uri or mlflow.get_tracking_uri())
         with mlflow.start_run() as run:
@@ -156,6 +157,35 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
             mlflow.log_artifact(str(out_path), artifact_path="results")
             logger.info(f"  ✓ Saved results to: {out_path.name}")
             logger.info("  ✓ Uploaded artifacts to MLflow")
+
+            # Additionally extract and log ball-specific detections (if model was trained for ball)
+            try:
+                ball_detections = []
+                for fdet in all_detections:
+                    frame_idx = fdet.get("frame")
+                    for det in fdet.get("detections", []):
+                        cls_name = str(det.get("class_name", "")).lower()
+                        # match labels that include 'ball' or 'cricket'
+                        if "ball" in cls_name or "cricket" in cls_name:
+                            det_copy = det.copy()
+                            det_copy["frame"] = frame_idx
+                            ball_detections.append(det_copy)
+
+                mlflow.log_metric("ball_detections_total", len(ball_detections))
+                logger.info(f"  📌 Ball detections found: {len(ball_detections)}")
+
+                if ball_detections:
+                    ball_out = {
+                        "ball_detections": ball_detections,
+                        "total_ball_detections": len(ball_detections),
+                        "model_run_id": run_id,
+                    }
+                    ball_out_path = cfg.results_dir / f"ball_results_{run_id}.json"
+                    save_json(ball_out, ball_out_path)
+                    mlflow.log_artifact(str(ball_out_path), artifact_path="results/ball_detections")
+                    logger.info(f"  ✓ Saved ball-specific results to: {ball_out_path.name}")
+            except Exception as e:
+                logger.warning(f"  ⚠️ Failed to extract/log ball detections: {e}")
     except Exception as e:
         logger.warning(f"  ⚠️  MLflow logging failed: {e}")
         # non-fatal: continue returning results even if logging fails
@@ -163,9 +193,13 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
     return {
         "status": "success",
         "run_id": run_id,
-        "predictions": all_detections[:3],  # Return first 3 frames
+        # For frontend: include a small preview of frames with detections
+        "predictions": all_detections[:3],  # Backwards-compatible preview (first 3 frames)
+        "predictions_preview": [d for d in all_detections if d.get("num_detections", 0) > 0][:10],
+        "frames_with_detections": [d.get("frame") for d in all_detections if d.get("num_detections", 0) > 0],
         "total_detections": total_objects,
         "frames_processed": len(frames),
         "inference_time": round(inference_time, 2),
         "result_file": out_path.name if out_path else None,
+        "ball_result_file": ball_out_path.name if ball_out_path else None,
     }
