@@ -2,9 +2,7 @@ import cv2
 import logging
 import os
 from yolo_detect import YOLOBallDetector
-from ball_tracker import ball_detect
-from cvzone.ColorModule import ColorFinder
-from preprocessing import preprocess_frame, preprocess_for_color_fallback
+from preprocessing import preprocess_frame
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +40,6 @@ def get_yolo_detector(weights_path=None, device: str = None):
         logger.info(f"Reloading YOLO weights: {weights}")
         _yolo_detector.load_weights(weights)
     return _yolo_detector
-
-
-color_finder = ColorFinder(False)
-hsv_vals = {
-    "hmin": 10, "smin": 44, "vmin": 192,
-    "hmax": 125, "smax": 114, "vmax": 255,
-}
-
 
 def detect_ball_on_frame(frame, yolo_weights=None, debug=False,
                          enable_preprocessing=None, ball_color=None,
@@ -115,14 +105,23 @@ def detect_ball_on_frame(frame, yolo_weights=None, debug=False,
             cv2.putText(frame_with_ball, f"Ball {confidence:.2f}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         found = True
     else:
-        # Color fallback uses an aggressive preprocess for color masks
-        processed_for_color = preprocess_for_color_fallback(frame, ball_color)
-        img_contours, cx, cy = ball_detect(processed_for_color, color_finder, hsv_vals)
-        if img_contours is not None:
-            overlay = frame_with_ball.copy()
-            mask = cv2.cvtColor(img_contours, cv2.COLOR_BGR2GRAY)
-            overlay[mask > 0] = img_contours[mask > 0]
-            frame_with_ball = overlay
-            found = True
+        # Prefer the HSV/shape fallback implemented inside YOLOBallDetector (cls_id == -1)
+        hsv_used = False
+        for det in yolo_detections:
+            if len(det) == 6:
+                x, y, w, h, confidence, cls_id = det
+            else:
+                x, y, w, h, confidence = det
+                cls_id = None
+            if cls_id == -1:
+                # Draw HSV fallback detection in green
+                cv2.rectangle(frame_with_ball, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.putText(frame_with_ball, f"HSV Ball {confidence:.2f}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                logger.debug("Using HSV fallback detection from YOLO detector")
+                found = True
+                hsv_used = True
+                break
+
+        # If no HSV fallback present in YOLO detections, keep existing behaviour (no detection)
 
     return frame_with_ball, found
