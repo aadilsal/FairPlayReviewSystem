@@ -1,21 +1,44 @@
-import cv2
 import os
+import cv2
+from pathlib import Path
 
-def frames_to_video_with_custom_path(input_video_path, frames_dir, fps=30, output_root="outputs"):
-    video_name = os.path.splitext(os.path.basename(input_video_path))[0]
-    output_video_folder = os.path.join(output_root, "frames", video_name)
-    os.makedirs(output_video_folder, exist_ok=True)
-    output_video_path = os.path.join(output_video_folder, f"output_{video_name}.mp4")
+def frames_to_video_with_custom_path(frames_dir: str, out_path: str, fps: int = 30):
+    """
+    Read all JPG/PNG files in frames_dir, sort them, and write a video to out_path.
+    """
+    frames_dir = Path(frames_dir)
+    if not frames_dir.exists():
+        raise FileNotFoundError(f"Frames directory not found: {frames_dir}")
 
-    frame_files = sorted([f for f in os.listdir(frames_dir) if f.endswith('.jpg')])
+    frame_files = sorted([f for f in os.listdir(frames_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
     if not frame_files:
-        raise ValueError("No frames found to combine into video.")
-    first_frame = cv2.imread(os.path.join(frames_dir, frame_files[0]))
-    height, width, _ = first_frame.shape
+        raise RuntimeError(f"No image frames found in {frames_dir}")
+
+    # read first frame to get size
+    first = cv2.imread(str(frames_dir / frame_files[0]))
+    if first is None:
+        raise RuntimeError(f"Could not read first frame: {frames_dir / frame_files[0]}")
+    h, w = first.shape[:2]
+
+    # ensure output dir exists
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+    writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
+    if not writer.isOpened():
+        raise RuntimeError(f"Failed to open video writer for {out_path}")
+
     for fname in frame_files:
-        frame = cv2.imread(os.path.join(frames_dir, fname))
-        out.write(frame)
-    out.release()
-    return output_video_path
+        img_path = frames_dir / fname
+        img = cv2.imread(str(img_path))
+        if img is None:
+            print(f"[WARN] Skipping unreadable frame: {img_path}")
+            continue
+        # resize if needed to match first frame
+        if img.shape[:2] != (h, w):
+            img = cv2.resize(img, (w, h))
+        writer.write(img)
+
+    writer.release()
+    print(f"[INFO] Video written: {out_path}")

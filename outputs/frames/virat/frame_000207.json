@@ -1,0 +1,10 @@
+{
+  "frame_index": 207,
+  "tracking_active": false,
+  "detections": [
+    {
+      "label": "Ball",
+      "data": true
+    }
+  ]
+}

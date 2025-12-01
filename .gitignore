@@ -35,15 +35,15 @@ Thumbs.db
 
 
 # Videos and large media
-test_videos/
-!test_videos/.gitkeep
-*.mp4
-*.avi
-*.mov
-*.mkv
-*.wmv
-*.flv
-*.webm
+# test_videos/
+# !test_videos/.gitkeep
+# *.mp4
+# *.avi
+# *.mov
+# *.mkv
+# *.wmv
+# *.flv
+# *.webm
 
 # Model weights and large binaries
 

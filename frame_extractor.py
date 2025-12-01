@@ -1,37 +1,52 @@
 import os
+from pathlib import Path
 import cv2
 
-def extract_video_frames(video_path, output_dir, target_fps=30):
-    import os
-    video_name = os.path.splitext(os.path.basename(video_path))[0]
-    frames_dir = os.path.join(output_dir, "frames", video_name)
-    os.makedirs(frames_dir, exist_ok=True)
-    frame_paths = []
+def extract_video_frames(video_path: str, output_dir: str, target_fps: int = 30):
+    """
+    Extract frames from `video_path` into `output_dir` at approx `target_fps`.
+    - If frames already exist in output_dir, returns the existing list.
+    - Avoids ZeroDivisionError when video fps is 0 or target_fps > source fps.
+    - Returns a sorted list of full frame file paths.
+    """
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check if frames already exist
-    existing_frames = [f for f in os.listdir(frames_dir) if f.lower().endswith('.jpg')]
-    if existing_frames:
-        print(f"Frames already exist for {video_name}, skipping extraction.")
-        return [os.path.join(frames_dir, f) for f in sorted(existing_frames)], frames_dir
+    # if frames already present, reuse them
+    existing = sorted([str(out_dir / f) for f in os.listdir(out_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+    if existing:
+        print(f"Frames already exist for {out_dir.name}, skipping extraction.")
+        return existing
 
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        raise FileNotFoundError(f"Could not open video file {video_path}")
+        raise RuntimeError(f"Failed to open video: {video_path}")
 
-    original_fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_interval = int(round(original_fps / target_fps)) if original_fps > target_fps else 1
-    count = 0
-    saved = 0
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+    if src_fps <= 0:
+        # fallback when FPS cannot be read
+        src_fps = 30.0
+
+    if target_fps <= 0:
+        target_fps = int(src_fps)
+
+    # compute frame step and avoid zero division
+    step = max(1, int(round(src_fps / float(target_fps))))
+
+    frame_paths = []
+    read_idx = 0
+    saved_idx = 0
+
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        if count % frame_interval == 0:
-            frame_path = os.path.join(frames_dir, f"frame_{saved:04d}.jpg")
-            cv2.imwrite(frame_path, frame)
-            frame_paths.append(frame_path)
-            saved += 1
-        count += 1
+        if read_idx % step == 0:
+            fname = out_dir / f"frame_{saved_idx:06d}.jpg"
+            cv2.imwrite(str(fname), frame)
+            frame_paths.append(str(fname))
+            saved_idx += 1
+        read_idx += 1
+
     cap.release()
-    print(f"Extracted {len(frame_paths)} frames to {frames_dir}")
-    return frame_paths, frames_dir
+    return frame_paths
