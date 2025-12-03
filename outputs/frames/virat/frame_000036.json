@@ -1,10 +1,20 @@
 {
   "frame_index": 36,
-  "tracking_active": false,
+  "tracking_active": true,
   "detections": [
     {
       "label": "Ball",
       "data": true
+    },
+    {
+      "label": "Batsman",
+      "box": [
+        530,
+        159,
+        143,
+        363
+      ],
+      "tracked": true
     }
   ]
 }

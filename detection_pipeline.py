@@ -21,13 +21,20 @@ def draw_status_overlay(
     consec_required,
     mode
 ):
-    text = (
+    if mode=="TRACK":
+        text = (
+        f"Matches: {consec_count}/{consec_required} | "
+        f"Mode: {mode}"
+    )
+    else:
+         text = (
         f"Persons: {num_persons} | "
         f"Bats: {num_bats} | "
         f"Best IoU: {best_iou:.3f} | "
         f"Matches: {consec_count}/{consec_required} | "
         f"Mode: {mode}"
-    )
+    )   
+    
 
     cv2.putText(
         frame,
@@ -127,10 +134,19 @@ def process_frames_pipeline(
 
         else:
             ok, bbox = batsman_tracker.update(frame)
+            metadata["tracking_active"] = True
 
             if ok:
                 x, y, w, h = map(int, bbox)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                
+                metadata["detections"].append({"label":"Batsman",
+                                               "box":[x,y,w,h],
+                                               "tracked":True})
+                    
+                cv2.rectangle(frame, 
+                              (x, y), 
+                              (x + w, y + h), 
+                              (255, 0, 0), 2)
 
                 cv2.putText(
                     frame,
@@ -144,9 +160,12 @@ def process_frames_pipeline(
 
                 draw_status_overlay(
                     frame,
-                    last_finder_meta["num_persons"],
-                    last_finder_meta["num_bats"],
-                    last_finder_meta["best_iou"],
+                    0,
+                    0,
+                    0.00,
+                    #last_finder_meta["num_persons"],
+                    #last_finder_meta["num_bats"],
+                    #last_finder_meta["best_iou"],
                     consec_required,
                     consec_required,
                     "TRACK"
