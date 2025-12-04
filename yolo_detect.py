@@ -73,6 +73,20 @@ class YOLOBallDetector:
             return detections
 
         results = self.model(img, conf=conf, iou=iou, imgsz=imgsz, device=self.device, verbose=False)
+        
+        # Get model class names for filtering
+        model_names = getattr(self.model, 'names', {})
+        ball_class_ids = []
+        
+        # Find ball-related classes (ball, sports ball, cricket ball, etc.)
+        for cls_id, name in model_names.items() if isinstance(model_names, dict) else enumerate(model_names):
+            name_lower = str(name).lower()
+            if any(keyword in name_lower for keyword in ['ball', 'cricket', 'sport']):
+                ball_class_ids.append(cls_id)
+        
+        if ball_class_ids:
+            logger.debug(f"Using ball classes: {[model_names.get(i, i) for i in ball_class_ids]}")
+        
         for result in results:
             boxes = getattr(result, 'boxes', None)
             if boxes is None:
@@ -83,6 +97,11 @@ class YOLOBallDetector:
                     cls_id = int(box.cls[0]) if hasattr(box.cls, '__len__') else int(box.cls)
                 except Exception:
                     cls_id = None
+                
+                # Filter: only accept ball-related classes if we found any
+                if ball_class_ids and cls_id not in ball_class_ids:
+                    continue
+                
                 try:
                     confidence = float(box.conf)
                 except Exception:

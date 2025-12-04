@@ -4,43 +4,26 @@ import cv2
 import argparse
 
 
-def extract_video_frames(video_path: str, output_dir: str, target_fps: int = 30):
-    """
-    Extract frames from `video_path` into `output_dir` at approx `target_fps`.
-    - If frames already exist in output_dir, returns the existing list.
-    - Avoids ZeroDivisionError when video fps is 0 or target_fps > source fps.
-    - Returns a sorted list of full frame file paths.
-    """
-    out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # if frames already present, reuse them
-    existing = sorted([str(out_dir / f) for f in os.listdir(out_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
-    if existing:
-        print(f"Frames already exist for {out_dir.name}, skipping extraction.")
-        return existing
 def extract_video_frames(video_path, output_dir, target_fps=30):
     """Extract frames from video and save as JPEGs.
 
     Args:
         video_path (str): Path to the input video file.
-        output_dir (str): Directory where frames will be saved. Frames are placed in
-            output_dir/frames/<video_name>.
+        output_dir (str): Directory where frames will be saved directly (no subdirs created).
         target_fps (int): Approximate number of frames to extract per second.
 
     Returns:
-        tuple: (list_of_frame_paths, frames_dir)
+        list: list_of_frame_paths
     """
-    video_name = os.path.splitext(os.path.basename(video_path))[0]
-    frames_dir = os.path.join(output_dir, "frames", video_name)
+    frames_dir = output_dir
     os.makedirs(frames_dir, exist_ok=True)
     frame_paths = []
 
     # Check if frames already exist
     existing_frames = [f for f in os.listdir(frames_dir) if f.lower().endswith('.jpg')]
     if existing_frames:
-        print(f"Frames already exist for {video_name}, skipping extraction.")
-        return [os.path.join(frames_dir, f) for f in sorted(existing_frames)], frames_dir
+        print(f"Frames already exist for {Path(frames_dir).name}, skipping extraction.")
+        return [os.path.join(frames_dir, f) for f in sorted(existing_frames)]
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -71,7 +54,7 @@ def extract_video_frames(video_path, output_dir, target_fps=30):
         if not ret:
             break
         if read_idx % step == 0:
-            fname = out_dir / f"frame_{saved_idx:06d}.jpg"
+            fname = os.path.join(frames_dir, f"frame_{saved_idx:06d}.jpg")
             cv2.imwrite(str(fname), frame)
             frame_paths.append(str(fname))
             saved_idx += 1

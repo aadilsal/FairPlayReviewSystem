@@ -18,8 +18,8 @@ WEIGHTS_DIR = os.path.join(REPO_ROOT, 'weights')
 # NOTE: The default ball detector weights were updated to the custom
 # Roboflow RF-DETR export. If you have a different runtime path, set
 # the `YOLO_BALL_WEIGHTS` env var or call `weights_config.set_yolo_ball_weights`.
-YOLO_BALL_WEIGHTS = os.environ.get('YOLO_BALL_WEIGHTS', os.path.join(WEIGHTS_DIR, 'weights.pt'))
-BATSMAN_WEIGHTS = os.environ.get('BATSMAN_WEIGHTS', os.path.join(WEIGHTS_DIR, 'yolov8s.pt'))
+YOLO_BALL_WEIGHTS = os.environ.get('YOLO_BALL_WEIGHTS', os.path.join(REPO_ROOT, 'ball-yolov8s.pt'))
+BATSMAN_WEIGHTS = os.environ.get('BATSMAN_WEIGHTS', os.path.join(REPO_ROOT, 'yolov8n.pt'))
 POSE_WEIGHTS = os.environ.get('POSE_WEIGHTS', os.path.join(WEIGHTS_DIR, 'yolov8s-pose.pt'))
 
 # Optional: per-color ball detector weights. These let you maintain separate

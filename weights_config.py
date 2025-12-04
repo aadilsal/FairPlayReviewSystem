@@ -5,7 +5,7 @@ weights to use for detectors. The training API will update this file's
 content (in-memory) so services can switch to newly-trained weights.
 """
 # Default paths (these can be updated at runtime)
-YOLO_BALL_WEIGHTS = 'yolov8s.pt'  # default to base pretrained so transfer-learning starts from COCO weights
+YOLO_BALL_WEIGHTS = 'ball-yolov8s.pt'
 BATSMAN_WEIGHTS = 'yolov8s.pt'
 
 

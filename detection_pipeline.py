@@ -4,7 +4,7 @@ import os
 import json
 
 from ball_detector import detect_ball_on_frame
-from pose_estimator import estimate_pose
+from detection.pose_detector import estimate_pose
 from Batsman_finder import BatsmanFinder
 from Batsman_tracker import BatsmanTracker
 
@@ -87,7 +87,7 @@ def process_frames_pipeline(
         # ======================================================
         # 1️⃣ BALL DETECTION (ALWAYS ON)
         # ======================================================
-        frame, ball_info = detect_ball_on_frame(frame)
+        frame, ball_info = detect_ball_on_frame(frame, frame_idx=frame_idx)
         if ball_info:
             metadata["detections"].append({
                 "label": "Ball",
@@ -132,22 +132,6 @@ def process_frames_pipeline(
                 else:
                     print("[WARN] Tracker initialization failed")
 
-
-        # Ball detection (YOLO, fallback to color) - use runtime-configured weights
-        if not os.path.exists(ball_marker):
-            frame_with_ball, ball_detected = detect_ball_on_frame(frame, yolo_weights=YOLO_BALL_WEIGHTS)
-            cv2.imwrite(frame_path, frame_with_ball)
-            with open(ball_marker, "w") as f:
-                f.write("ball detected")
-        else:
-            frame_with_ball = cv2.imread(frame_path)
-
-        # Person detection
-        if not os.path.exists(person_marker):
-            frame_with_persons, _ = detect_persons(frame_with_ball)
-            cv2.imwrite(frame_path, frame_with_persons)
-            with open(person_marker, "w") as f:
-                f.write("person detected")
         else:
             ok, bbox = batsman_tracker.update(frame)
             metadata["tracking_active"] = True
