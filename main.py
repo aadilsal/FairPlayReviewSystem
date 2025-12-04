@@ -75,76 +75,75 @@ class CricketBallDetector:
             "Backups are available in `backup_ball_detection/` if you need to restore it."
         )
 import argparse
-from pipeline.preprocessing import extract_video_frames
-from pipeline.main_pipeline import process_frames_pipeline
-from pipeline.postprocessing import frames_to_video_with_custom_path
-
-
-def process_single_video(input_path, output_dir, fps, motion_prediction=True, motion_preset='balanced',
-                        enable_preprocessing=True, target_brightness=0.5):
-    frame_paths, frames_dir = extract_video_frames(input_path, output_dir, fps)
-    process_frames_pipeline(frame_paths, enable_motion_prediction=motion_prediction, motion_preset=motion_preset,
-                          enable_preprocessing=enable_preprocessing, target_brightness=target_brightness)
-    output_video_path = frames_to_video_with_custom_path(input_path, frames_dir, fps, output_dir)
-    print(f"Output video saved to: {output_video_path}")
-
-
-def process_folder(folder_path, output_dir, fps, motion_prediction=True, motion_preset='balanced',
-                   enable_preprocessing=True, target_brightness=0.5):
-    videos = [os.path.join(folder_path, f) for f in os.listdir(folder_path)
-              if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))]
-    if not videos:
-        print(f"No video files found in {folder_path}")
-        return
-    for vid in videos:
-        print(f"\n=== Processing {vid} ===")
-        process_single_video(vid, output_dir, fps, motion_prediction, motion_preset,
-                           enable_preprocessing, target_brightness)
-
+import os
+from pathlib import Path
+from frame_extractor import extract_video_frames
+from detection_pipeline import process_frames_pipeline
+from video_utils import frames_to_video_with_custom_path
 
 def main():
-    parser = argparse.ArgumentParser(description='Run FairPlayReviewSystem pipeline')
-    parser.add_argument('--input', '-i', required=True,
-                        help='Path to input video file or folder containing videos')
-    parser.add_argument('--output', '-o', default='outputs', help='Output directory')
-    parser.add_argument('--fps', type=int, default=30, help='Target FPS for extraction and output video')
-    parser.add_argument('--no-motion-prediction', action='store_true', 
-                        help='Disable ball motion prediction (default: enabled)')
-    parser.add_argument('--motion-preset', default='balanced',
-                        choices=['conservative', 'balanced', 'aggressive', 'high_quality', 'disabled'],
-                        help='Motion prediction preset (default: balanced)')
-    parser.add_argument('--no-preprocessing', action='store_true',
-                        help='Disable adaptive frame preprocessing (default: enabled)')
-    parser.add_argument('--target-brightness', type=float, default=0.5,
-                        help='Target brightness for preprocessing (0.3-0.7, default: 0.5)')
+    parser = argparse.ArgumentParser(description='FairPlayReviewSystem - Batsman Detection & Tracking')
+    parser.add_argument('--input', '-i', required=True, help='Path to input video file')
+    parser.add_argument('--output', '-o', default='outputs/frames', help='Output directory (default: outputs)')
+    parser.add_argument('--fps', type=int, default=30, help='FPS for output video (default: 30)')
+    parser.add_argument('--person-conf', type=float, default=0.5, help='Person detection confidence (default: 0.5)')
+    parser.add_argument('--bat-conf', type=float, default=0.2, help='Bat detection confidence (default: 0.3)')
+    parser.add_argument('--iou-thresh', type=float, default=0.12, help='IoU threshold for bat-person overlap (default: 0.12)')
+    parser.add_argument('--consec-frames', type=int, default=3, help='Consecutive frames required to lock batsman (default: 3)')
+    #parser.add_argument('--pos-tolerance', type=int, default=50, help='Position tolerance in pixels (default: 50)')
+
     args = parser.parse_args()
 
-    # Determine motion prediction settings
-    enable_motion = not args.no_motion_prediction
-    motion_preset = args.motion_preset if enable_motion else 'disabled'
+    # validate input file exists
+    if not os.path.exists(args.input):
+        print(f"[ERROR] Input video file not found: {args.input}")
+        return
+
+    # create output directory
+    if not os.path.exists(args.output):
+        output_dir = Path(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Determine preprocessing settings
-    enable_preprocessing = not args.no_preprocessing
-    target_brightness = args.target_brightness
+
+    # extract video name (without extension)
+    video_name = Path(args.input).stem
+    frames_dir = Path(args.output) / video_name
+    if not os.path.exists(frames_dir):
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        
     
-    print("\n" + "="*70)
-    print("FAIRPLAY REVIEW SYSTEM - PIPELINE CONFIGURATION")
-    print("="*70)
-    print(f"Motion Prediction: {'✓ Enabled' if enable_motion else '✗ Disabled'}")
-    if enable_motion:
-        print(f"  └─ Preset: {motion_preset}")
-    print(f"Frame Preprocessing: {'✓ Enabled' if enable_preprocessing else '✗ Disabled'}")
-    if enable_preprocessing:
-        print(f"  └─ Target Brightness: {target_brightness}")
-    print("="*70 + "\n")
 
-    if os.path.isdir(args.input):
-        process_folder(args.input, args.output, args.fps, enable_motion, motion_preset,
-                      enable_preprocessing, target_brightness)
-    else:
-        process_single_video(args.input, args.output, args.fps, enable_motion, motion_preset,
-                           enable_preprocessing, target_brightness)
+    print(f"[INFO] Extracting frames from {args.input}...")
+    frame_paths_result = extract_video_frames(args.input, str(frames_dir), args.fps)
 
+    # Always build a deterministic, sorted list of frame files from frames_dir
+    frame_files = sorted([p for p in os.listdir(frames_dir) if p.lower().endswith(('.jpg', '.png'))])
+    frame_paths = [str(frames_dir / f) for f in frame_files]
 
-if __name__ == '__main__':
+    print(f"[INFO] Extracted {len(frame_paths)} frames to {frames_dir}")
+
+    print(f"[INFO] Running detection pipeline...")
+    print(f"  - Person confidence: {args.person_conf}")
+    print(f"  - Bat confidence: {args.bat_conf}")
+    print(f"  - IoU threshold: {args.iou_thresh}")
+    print(f"  - Consecutive frames required: {args.consec_frames}")
+    #print(f"  - Position tolerance: {args.pos_tolerance} px")
+
+    # run detection pipeline with arguments
+    process_frames_pipeline(
+        frame_paths,
+        person_conf=args.person_conf,
+        bat_conf=args.bat_conf,
+        iou_thresh=args.iou_thresh,
+        consec_required=args.consec_frames
+    )
+
+    print(f"[INFO] Detection pipeline completed.")
+
+    print(f"[INFO] Creating output video...")
+    output_video_path = frames_dir / f"{video_name}_output.mp4"
+    frames_to_video_with_custom_path(str(frames_dir), str(output_video_path), args.fps)
+    print(f"[INFO] Output video saved to {output_video_path}")
+
+if __name__ == "__main__":
     main()
