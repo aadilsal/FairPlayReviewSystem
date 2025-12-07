@@ -89,10 +89,57 @@ def process_frames_pipeline(
         # ======================================================
         frame, ball_info = detect_ball_on_frame(frame, frame_idx=frame_idx)
         if ball_info:
+            # Keep full ball_info for diagnostics
             metadata["detections"].append({
                 "label": "Ball",
                 "data": ball_info
             })
+
+            # Also add a box entry similar to how batsman is stored
+            try:
+                bx1, by1, bx2, by2 = ball_info.get('bbox', [0, 0, 0, 0])
+                bw = int(bx2 - bx1)
+                bh = int(by2 - by1)
+                metadata["detections"].append({
+                    "label": "Ball",
+                    "box": [int(bx1), int(by1), bw, bh],
+                    "confidence": float(ball_info.get('confidence', 0.0)),
+                    "tracked": False
+                })
+            except Exception:
+                # ignore if malformed ball_info
+                pass
+
+            # Also append to global detections.json (matching existing format)
+            try:
+                detections_path = os.path.join(os.getcwd(), "detections.json")
+                if os.path.exists(detections_path):
+                    with open(detections_path, "r", encoding="utf-8") as df:
+                        existing = json.load(df)
+                        if not isinstance(existing, list):
+                            existing = []
+                else:
+                    existing = []
+
+                x1, y1, x2, y2 = ball_info.get('bbox', [0, 0, 0, 0])
+                conf = ball_info.get('confidence', 0.0)
+                entry = {
+                    "frame_index": frame_idx,
+                    "frame_id": os.path.basename(frame_path),
+                    "x_min": float(x1),
+                    "y_min": float(y1),
+                    "x_max": float(x2),
+                    "y_max": float(y2),
+                    "confidence": float(conf),
+                    "class_id": None,
+                    "class_name": "sports ball"
+                }
+
+                existing.append(entry)
+                with open(detections_path, "w", encoding="utf-8") as df:
+                    json.dump(existing, df, indent=2)
+            except Exception as e:
+                print(f"[WARN] Failed to append ball detection to detections.json: {e}")
 
         # ======================================================
         # 2️⃣ BATSMAN FINDING / TRACKING

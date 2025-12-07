@@ -2,6 +2,7 @@ import cv2
 import logging
 import os
 import numpy as np
+from typing import Tuple
 from yolo_detect import YOLOBallDetector
 from preprocessing import preprocess_frame
 
@@ -114,6 +115,55 @@ def is_ball_colored(frame, x, y, w, h, ball_color='white'):
         return True  # If validation fails, don't reject
 
 
+def is_shoe_like(img: np.ndarray, bbox: Tuple[int, int, int, int], elongation_thresh: float = 2.2, bottom_of_frame_margin: int = 20) -> bool:
+    """
+    Heuristic to reject detections that look like shoes.
+    - Checks bounding box elongation (width vs height) — shoes are often elongated horizontally.
+    - If the detection is very close to the bottom of the frame, it's more likely to be a shoe.
+    Returns True if detection appears shoe-like and should be rejected.
+    """
+    x1, y1, x2, y2 = bbox
+    w = max(1, x2 - x1)
+    h = max(1, y2 - y1)
+    elongation = max(w / h, h / w)
+    if elongation >= elongation_thresh:
+        return True
+
+    # bottom-of-frame heuristic
+    img_h = img.shape[0]
+    if (img_h - y2) <= bottom_of_frame_margin:
+        return True
+
+    return False
+
+
+def is_ball_circular(img: np.ndarray, bbox: Tuple[int, int, int, int], circularity_thresh: float = 0.55) -> bool:
+    """
+    Estimate circularity of the detected object by thresholding and contour analysis.
+    Returns True if the region is sufficiently circular to be considered a ball.
+    """
+    x1, y1, x2, y2 = bbox
+    crop = img[y1:y2, x1:x2]
+    if crop.size == 0:
+        return False
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    _, th = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return False
+    # pick the largest contour
+    c = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(c)
+    if area <= 0:
+        return False
+    perimeter = cv2.arcLength(c, True)
+    if perimeter == 0:
+        return False
+    circularity = 4 * np.pi * (area / (perimeter * perimeter))
+    return circularity >= circularity_thresh
+
+
 def update_detection_config(**kwargs):
     DETECTION_CONFIG.update(kwargs)
     logger.info(f"Updated detection config: {kwargs}")
@@ -161,6 +211,7 @@ def detect_ball_on_frame(frame, yolo_weights=None, debug=False,
     # PREPROCESSING
     processed_frame = frame
     debug_info = {}
+    ball_info = None
     if enable_preprocessing:
         processed_frame, debug_info = preprocess_frame(frame, ball_color=ball_color)
         logger.debug(f"Preprocessing applied: {debug_info}")
@@ -201,14 +252,28 @@ def detect_ball_on_frame(frame, yolo_weights=None, debug=False,
                 logger.debug(f"Rejected: area {area} outside range")
             continue
         
-        # Filter 2: Color validation
+        # Filter 2: Shoe-like rejection
+        # Convert bbox to x1,y1,x2,y2 for helpers
+        x1, y1, x2, y2 = x, y, x + w, y + h
+        if is_shoe_like(frame, (x1, y1, x2, y2)):
+            if debug:
+                logger.debug(f"Rejected: shoe-like detection at ({x},{y},{w},{h})")
+            continue
+
+        # Filter 3: Circularity check
+        if not is_ball_circular(frame, (x1, y1, x2, y2)):
+            if debug:
+                logger.debug(f"Rejected: non-circular detection at ({x},{y},{w},{h})")
+            continue
+
+        # Filter 4: Color validation
         if DETECTION_CONFIG.get('enable_color_filter', True):
             if not is_ball_colored(frame, x, y, w, h, ball_color):
                 if debug:
                     logger.debug(f"Rejected: color validation failed at ({x},{y})")
                 continue
-        
-        # Filter 3: Motion tracking
+
+        # Filter 5: Motion tracking
         if DETECTION_CONFIG.get('enable_motion_tracking', True):
             center = (x + w // 2, y + h // 2)
             if not _motion_tracker.validate_detection(center, frame_idx):
@@ -224,24 +289,25 @@ def detect_ball_on_frame(frame, yolo_weights=None, debug=False,
             cv2.rectangle(frame_with_ball, (x, y), (x + w, y + h), (0, 0, 255), 2)
             cv2.putText(frame_with_ball, f"Ball {confidence:.2f}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         found = True
-    else:
-        # Prefer the HSV/shape fallback implemented inside YOLOBallDetector (cls_id == -1)
-        hsv_used = False
-        for det in yolo_detections:
-            if len(det) == 6:
-                x, y, w, h, confidence, cls_id = det
-            else:
-                x, y, w, h, confidence = det
-                cls_id = None
-            if cls_id == -1:
-                # Draw HSV fallback detection in green
-                cv2.rectangle(frame_with_ball, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(frame_with_ball, f"HSV Ball {confidence:.2f}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                logger.debug("Using HSV fallback detection from YOLO detector")
-                found = True
-                hsv_used = True
-                break
+    # else:
+    #     # HSV FALLBACK DISABLED
+    #     # Prefer the HSV/shape fallback implemented inside YOLOBallDetector (cls_id == -1)
+    #     hsv_used = False
+    #     for det in yolo_detections:
+    #         if len(det) == 6:
+    #             x, y, w, h, confidence, cls_id = det
+    #         else:
+    #             x, y, w, h, confidence = det
+    #             cls_id = None
+    #         if cls_id == -1:
+    #             # Draw HSV fallback detection in green
+    #             cv2.rectangle(frame_with_ball, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    #             cv2.putText(frame_with_ball, f"HSV Ball {confidence:.2f}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    #             logger.debug("Using HSV fallback detection from YOLO detector")
+    #             found = True
+    #             hsv_used = True
+    #             break
+    #
+    #     # If no HSV fallback present in YOLO detections, keep existing behaviour (no detection)
 
-        # If no HSV fallback present in YOLO detections, keep existing behaviour (no detection)
-
-    return frame_with_ball, found
+    return frame_with_ball, ball_info
