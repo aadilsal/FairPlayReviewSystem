@@ -1,0 +1,16 @@
+{
+  "frame_index": 39,
+  "tracking_active": true,
+  "detections": [
+    {
+      "label": "Batsman",
+      "box": [
+        420,
+        36,
+        63,
+        164
+      ],
+      "tracked": true
+    }
+  ]
+}

@@ -20,7 +20,7 @@ def _load_yolo_model(path, fallback='yolov8n.pt'):
 # Load your trained batsman detector (can replace path after training)
 batsman_model = _load_yolo_model(BATSMAN_WEIGHTS)
 # Load general person detector (COCO) - use a small model by default for speed
-person_model = _load_yolo_model('yolov8s.pt')  # or yolov8n.pt for faster inference
+person_model = _load_yolo_model(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'yolov8n.pt'))
 
 
 def set_batsman_weights(path: str):
