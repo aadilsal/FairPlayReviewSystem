@@ -41,18 +41,36 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
         return {"status": "error", "message": f"video_invalid:{reason}"}
     logger.info("  ✓ Video validated")
 
-    # Load YOLO model
-    logger.info("  🤖 Step 2: Loading YOLO model from MLflow...")
+    # Load YOLO models (ball + batsman)
+    logger.info("  🤖 Step 2: Loading YOLO models from MLflow...")
     mm = YOLOModelManager(cfg.mlflow_tracking_uri, cfg.mlflow_username, cfg.mlflow_password)
 
     start = time.time()
-    
+
+    # Attempt to load ball model (backwards compatible with MODEL_RUN_ID)
+    ball_model = None
+    batsman_model = None
     try:
-        model = mm.get_model(cfg.model_run_id)
-        logger.info("  ✓ YOLO model loaded successfully")
+        if cfg.model_run_id_ball:
+            ball_model = mm.get_model(cfg.model_run_id_ball)
+            logger.info(f"  ✓ Ball model loaded from run {cfg.model_run_id_ball}")
+        elif cfg.model_run_id:
+            ball_model = mm.get_model(cfg.model_run_id)
+            logger.info(f"  ✓ Ball model loaded from run {cfg.model_run_id} (MODEL_RUN_ID)")
     except Exception as e:
-        logger.error(f"  ❌ Model loading failed: {e}")
-        return {"status": "error", "message": f"model_load_failed:{e}"}
+        logger.warning(f"  ⚠️ Ball model loading failed: {e}")
+
+    # Attempt to load batsman model if configured
+    try:
+        if cfg.model_run_id_batsman:
+            batsman_model = mm.get_model(cfg.model_run_id_batsman)
+            logger.info(f"  ✓ Batsman model loaded from run {cfg.model_run_id_batsman}")
+    except Exception as e:
+        logger.warning(f"  ⚠️ Batsman model loading failed: {e}")
+
+    if not ball_model and not batsman_model:
+        logger.error("  ❌ No models available for inference (ball or batsman)")
+        return {"status": "error", "message": "no_models_available"}
 
     # Extract and preprocess frames
     logger.info("  🎞️  Step 3: Extracting frames...")
@@ -70,47 +88,64 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
     
     logger.info(f"  ✓ Extracted {len(frames)} frames")
 
-    # Run YOLO inference on frames
-    logger.info("  🔮 Step 4: Running YOLO object detection...")
+    # Run YOLO inference on frames with both models
+    logger.info("  🔮 Step 4: Running YOLO object detection (ball + batsman)...")
     all_detections = []
-    
+
     try:
         for idx, frame in enumerate(frames):
-            # Convert frame back to BGR for YOLO (it expects BGR from OpenCV)
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            
-            # Run YOLO detection
-            results = model(frame_bgr, conf=0.25, iou=0.45, verbose=False, device=cfg.device)
-            
-            # Extract detection results
+
             frame_detections = []
-            for result in results:
-                boxes = result.boxes
-                if boxes is not None:
-                    for box in boxes:
-                        # Get box coordinates (xyxy format)
-                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        conf = float(box.conf[0].cpu().numpy())
-                        cls = int(box.cls[0].cpu().numpy())
-                        cls_name = model.names[cls] if hasattr(model, 'names') else str(cls)
-                        
-                        frame_detections.append({
-                            "bbox": [float(x1), float(y1), float(x2), float(y2)],
-                            "confidence": round(conf, 3),
-                            "class_id": cls,
-                            "class_name": cls_name
-                        })
-            
+
+            # Helper to process results from a model and tag them with source
+            def process_results(results, src_name, src_model):
+                dets = []
+                for result in results:
+                    boxes = result.boxes
+                    if boxes is not None:
+                        for box in boxes:
+                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                            conf = float(box.conf[0].cpu().numpy())
+                            cls = int(box.cls[0].cpu().numpy())
+                            cls_name = src_model.names[cls] if hasattr(src_model, 'names') else str(cls)
+                            dets.append({
+                                "bbox": [float(x1), float(y1), float(x2), float(y2)],
+                                "confidence": round(conf, 3),
+                                "class_id": cls,
+                                "class_name": cls_name,
+                                "source": src_name,
+                            })
+                return dets
+
+            # Run ball model
+            if ball_model:
+                try:
+                    results_ball = ball_model(frame_bgr, conf=0.25, iou=0.45, verbose=False, device=cfg.device)
+                    bd = process_results(results_ball, 'ball', ball_model)
+                    frame_detections.extend(bd)
+                except Exception as e:
+                    logger.warning(f"  ⚠️ Ball model inference failed on frame {idx}: {e}")
+
+            # Run batsman model
+            if batsman_model:
+                try:
+                    results_bat = batsman_model(frame_bgr, conf=0.25, iou=0.45, verbose=False, device=cfg.device)
+                    bd = process_results(results_bat, 'batsman', batsman_model)
+                    frame_detections.extend(bd)
+                except Exception as e:
+                    logger.warning(f"  ⚠️ Batsman model inference failed on frame {idx}: {e}")
+
             detection_result = {
                 "frame": idx,
                 "num_detections": len(frame_detections),
-                "detections": frame_detections[:10]  # Limit to top 10 per frame
+                "detections": frame_detections[:50]  # keep up to 50 combined
             }
             all_detections.append(detection_result)
-            
+
             if (idx + 1) % 10 == 0:
                 logger.info(f"  ⏳ Processed {idx + 1}/{len(frames)} frames...")
-                
+
         logger.info(f"  ✓ Completed detection on all {len(frames)} frames")
     except Exception as e:
         logger.error(f"  ❌ Inference failed: {e}")
@@ -121,8 +156,16 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
     inference_time = time.time() - start
     logger.info(f"  ⏱️  Total inference time: {inference_time:.2f}s")
 
-    # Count total detections
+    # Count total detections and breakdown by source
     total_objects = sum(d["num_detections"] for d in all_detections)
+    ball_count = 0
+    batsman_count = 0
+    for fr in all_detections:
+        for det in fr.get("detections", []):
+            if det.get("source") == 'ball':
+                ball_count += 1
+            elif det.get("source") == 'batsman':
+                batsman_count += 1
     logger.info(f"  📊 Total objects detected: {total_objects}")
 
     # Log run to mlflow
@@ -140,9 +183,16 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
             mlflow.log_param("video_path", str(video_path))
             mlflow.log_param("frames_processed", len(frames))
             mlflow.log_param("framework", "ultralytics_yolo")
+            # Log which model run ids were used
+            if cfg.model_run_id_ball:
+                mlflow.log_param("model_run_id_ball", cfg.model_run_id_ball)
+            if cfg.model_run_id_batsman:
+                mlflow.log_param("model_run_id_batsman", cfg.model_run_id_batsman)
             mlflow.log_metric("inference_time", inference_time)
             mlflow.log_metric("avg_time_per_frame", inference_time / len(frames))
             mlflow.log_metric("total_detections", total_objects)
+            mlflow.log_metric("ball_detections_total", ball_count)
+            mlflow.log_metric("batsman_detections_total", batsman_count)
             logger.info("  ✓ Logged parameters and metrics")
 
             results = {

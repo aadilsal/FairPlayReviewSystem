@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  backend:
+    build: .
+    ports:
+      - '8000:8000'
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MODEL_RUN_ID=${MODEL_RUN_ID}
+      - MLFLOW_TRACKING_USERNAME=${MLFLOW_TRACKING_USERNAME}
+      - MLFLOW_TRACKING_PASSWORD=${MLFLOW_TRACKING_PASSWORD}
+    volumes:
+      - ./:/app
+    depends_on:
+      - mlflow
+
+  mlflow:
+    image: python:3.11-slim
+    container_name: mlflow_server
+    volumes:
+      - ./mlflow_artifacts:/mlflow/artifacts
+    ports:
+      - '5000:5000'
+    environment:
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=/mlflow/artifacts
+    command: >
+      bash -lc "pip install --no-cache-dir mlflow dagshub && \
+      mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root /mlflow/artifacts --host 0.0.0.0 --port 5000"
