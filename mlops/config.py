@@ -15,7 +15,6 @@ class Config:
     mlflow_password: str
     mlflow_model_name: str
     model_run_id: str
-    # Support separate models for ball and batsman detection
     model_run_id_ball: str
     model_run_id_batsman: str
     model_version: str
@@ -32,7 +31,6 @@ def load_config() -> Config:
     upload_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Backwards compatibility: allow MODEL_RUN_ID to be used for ball
     model_run_id = os.getenv("MODEL_RUN_ID", "")
     model_run_id_ball = os.getenv("MODEL_RUN_ID_BALL", model_run_id)
     model_run_id_batsman = os.getenv("MODEL_RUN_ID_BATSMAN", "")

@@ -20,16 +20,16 @@ def main():
     model = mm.get_model(cfg.model_run_id)
     print("✓ Model loaded\n")
     
-    # Create a dummy input image (320x320x3 for EfficientDet Lite2)
+   
     print("Creating test input (320x320x3 RGB image)...")
     dummy_img = np.zeros((320, 320, 3), dtype=np.uint8)
     input_tensor = tf.convert_to_tensor(dummy_img, dtype=tf.uint8)
-    input_tensor = tf.expand_dims(input_tensor, 0)  # Add batch dimension
+    input_tensor = tf.expand_dims(input_tensor, 0) 
     
     print(f"Input shape: {input_tensor.shape}")
     print(f"Input dtype: {input_tensor.dtype}\n")
     
-    # Run inference
+
     print("Running inference...")
     detections = model(input_tensor)
     
@@ -37,11 +37,11 @@ def main():
     print("MODEL OUTPUT ANALYSIS")
     print("=" * 60)
     
-    # Analyze output type
+
     print(f"\n1. Output Type: {type(detections)}")
     print(f"   Type name: {type(detections).__name__}")
     
-    # Check if it's a dict-like object
+   
     if hasattr(detections, 'keys'):
         print(f"\n2. Has 'keys' attribute: Yes")
         try:
@@ -62,8 +62,7 @@ def main():
                     print(f"   - Sample value: {arr.flatten()[:3]}")
         except Exception as e:
             print(f"   Error accessing keys: {e}")
-    
-    # Check if it's a tuple
+
     elif isinstance(detections, tuple):
         print(f"\n2. Is tuple: Yes")
         print(f"   Tuple length: {len(detections)}")
@@ -73,18 +72,17 @@ def main():
             print(f"   - Type: {type(item)}")
             print(f"   - Shape: {item.shape if hasattr(item, 'shape') else 'N/A'}")
             print(f"   - Dtype: {item.dtype if hasattr(item, 'dtype') else 'N/A'}")
-    
-    # Check if it's a list
+
     elif isinstance(detections, list):
         print(f"\n2. Is list: Yes")
         print(f"   List length: {len(detections)}")
     
-    # Other type
+
     else:
         print(f"\n2. Special TensorFlow object")
         print(f"   Dir: {[attr for attr in dir(detections) if not attr.startswith('_')][:20]}")
         
-        # Try common TF Hub patterns
+     
         if hasattr(detections, 'numpy'):
             print(f"   Has numpy() method")
             try:

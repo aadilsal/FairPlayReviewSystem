@@ -1,0 +1,91 @@
+# Version control
+.git
+.gitignore
+.github
+
+# Python caches and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.keystore
+
+# Large model weights (fetched from MLflow/DagsHub at runtime)
+weights/
+models/
+*.pt
+*.pth
+*.onnx
+
+# Large datasets
+Cricket_Batsman_data/
+cricket_ball_data/
+roboflow_data/
+
+# Project outputs and artifacts
+outputs/
+runs/
+mlflow_artifacts/
+mlflow.db
+
+# Backups and temporary files
+backup_ball_detection/
+backup_originals/
+*.backup
+*.bak
+*_backup/
+
+# Test data
+test_videos/
+test/
+
+# DVC
+.dvc/
+.data/
+
+# Training/validation splits (if stored locally)
+train/
+valid/
+
+# Documentation build output
+docs/_build/
+
+# Misc
+.DS_Store
+*.log

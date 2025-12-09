@@ -13,9 +13,8 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 ALLOWED_EXT = {"mp4", "avi", "mov", "mkv"}
 MAX_MB = int(os.getenv("MAX_VIDEO_SIZE", 500))
 
-# Helper functions for console logging
+
 def log(msg, level="INFO"):
-    """Print formatted log message to console"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     icons = {"INFO": "ℹ️", "SUCCESS": "✅", "ERROR": "❌", "WARNING": "⚠️", "DEBUG": "🔍"}
     icon = icons.get(level, "ℹ️")
@@ -104,11 +103,11 @@ def main():
 
                 st.write("**📝 MLflow Run ID:**", data.get("run_id"))
 
-                # Play the uploaded video
+          
                 st.subheader("🎬 Uploaded Video")
                 st.video(uploaded)
 
-                # Prefer the more detailed preview fields if provided by backend
+           
                 preds_preview = data.get("predictions_preview")
                 preds = data.get("predictions")
                 frames_with_detections = data.get("frames_with_detections")

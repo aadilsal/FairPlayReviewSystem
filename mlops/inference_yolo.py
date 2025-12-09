@@ -26,23 +26,23 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
     Returns:
         Dictionary with status, predictions, and metadata
     """
-    logger.info("  📹 INFERENCE PIPELINE STARTED")
-    logger.info(f"  📂 Video: {video_path.name}")
+    logger.info("INFERENCE PIPELINE STARTED")
+    logger.info(f"Video: {video_path.name}")
     
     cfg = load_config()
     ensure_dir(cfg.results_dir)
 
-    # Validate video
-    logger.info("  🔍 Step 1: Validating video...")
+    
+    logger.info("Step 1: Validating video...")
     vp = VideoProcessor()
     ok, reason = vp.validate_video(video_path)
     if not ok:
-        logger.error(f"  ❌ Video validation failed: {reason}")
+        logger.error(f"Video validation failed: {reason}")
         return {"status": "error", "message": f"video_invalid:{reason}"}
-    logger.info("  ✓ Video validated")
+    logger.info("Video validated")
 
     # Load YOLO models (ball + batsman)
-    logger.info("  🤖 Step 2: Loading YOLO models from MLflow...")
+    logger.info("Step 2: Loading YOLO models from MLflow...")
     mm = YOLOModelManager(cfg.mlflow_tracking_uri, cfg.mlflow_username, cfg.mlflow_password)
 
     start = time.time()
@@ -79,8 +79,6 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
     for f in vp.extract_frames(video_path):
         frames.append(f)  # Keep original format for YOLO
         frame_count += 1
-        if frame_count >= 30:  # Limit frames for demo
-            break
 
     if len(frames) == 0:
         logger.error("  ❌ No frames extracted from video")
@@ -98,8 +96,8 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
 
             frame_detections = []
 
-            # Helper to process results from a model and tag them with source
-            def process_results(results, src_name, src_model):
+          
+            def process_results(results, src_name, src_model, filter_classes=None):
                 dets = []
                 for result in results:
                     boxes = result.boxes
@@ -109,6 +107,8 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
                             conf = float(box.conf[0].cpu().numpy())
                             cls = int(box.cls[0].cpu().numpy())
                             cls_name = src_model.names[cls] if hasattr(src_model, 'names') else str(cls)
+                            if filter_classes and cls_name not in filter_classes:
+                                continue  # Skip detections not in filter
                             dets.append({
                                 "bbox": [float(x1), float(y1), float(x2), float(y2)],
                                 "confidence": round(conf, 3),
@@ -118,11 +118,11 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
                             })
                 return dets
 
-            # Run ball model
+          
             if ball_model:
                 try:
                     results_ball = ball_model(frame_bgr, conf=0.25, iou=0.45, verbose=False, device=cfg.device)
-                    bd = process_results(results_ball, 'ball', ball_model)
+                    bd = process_results(results_ball, 'ball', ball_model, filter_classes=['sports ball'])
                     frame_detections.extend(bd)
                 except Exception as e:
                     logger.warning(f"  ⚠️ Ball model inference failed on frame {idx}: {e}")
@@ -131,7 +131,7 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
             if batsman_model:
                 try:
                     results_bat = batsman_model(frame_bgr, conf=0.25, iou=0.45, verbose=False, device=cfg.device)
-                    bd = process_results(results_bat, 'batsman', batsman_model)
+                    bd = process_results(results_bat, 'batsman', batsman_model, filter_classes=['person'])
                     frame_detections.extend(bd)
                 except Exception as e:
                     logger.warning(f"  ⚠️ Batsman model inference failed on frame {idx}: {e}")
@@ -139,7 +139,7 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
             detection_result = {
                 "frame": idx,
                 "num_detections": len(frame_detections),
-                "detections": frame_detections[:50]  # keep up to 50 combined
+                "detections": frame_detections[:50]  
             }
             all_detections.append(detection_result)
 
@@ -240,12 +240,16 @@ def run_inference(video_path: Path) -> Dict[str, Any]:
         logger.warning(f"  ⚠️  MLflow logging failed: {e}")
         # non-fatal: continue returning results even if logging fails
 
+    # Prepare preview for frontend: include frames with ball and batsman detections
+    ball_frames = [d for d in all_detections if any(det.get("source") == "ball" for det in d.get("detections", []))]
+    batsman_frames = [d for d in all_detections if any(det.get("source") == "batsman" for det in d.get("detections", []))]
+
     return {
         "status": "success",
         "run_id": run_id,
         # For frontend: include a small preview of frames with detections
         "predictions": all_detections[:3],  # Backwards-compatible preview (first 3 frames)
-        "predictions_preview": [d for d in all_detections if d.get("num_detections", 0) > 0][:10],
+        "predictions_preview": (ball_frames[:5] + batsman_frames[:5])[:10],
         "frames_with_detections": [d.get("frame") for d in all_detections if d.get("num_detections", 0) > 0],
         "total_detections": total_objects,
         "frames_processed": len(frames),

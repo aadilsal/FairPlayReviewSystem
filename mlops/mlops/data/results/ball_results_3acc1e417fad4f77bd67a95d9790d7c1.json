@@ -1,0 +1,734 @@
+{
+  "ball_detections": [
+    {
+      "bbox": [
+        393.291259765625,
+        48.22715759277344,
+        439.81304931640625,
+        111.46757507324219
+      ],
+      "confidence": 0.558,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 27
+    },
+    {
+      "bbox": [
+        436.98779296875,
+        217.0042724609375,
+        475.9110107421875,
+        266.251220703125
+      ],
+      "confidence": 0.458,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 28
+    },
+    {
+      "bbox": [
+        490.6260986328125,
+        437.2638244628906,
+        518.962890625,
+        468.5295104980469
+      ],
+      "confidence": 0.626,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 30
+    },
+    {
+      "bbox": [
+        508.2789001464844,
+        515.5133056640625,
+        534.0770263671875,
+        544.6739501953125
+      ],
+      "confidence": 0.564,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 31
+    },
+    {
+      "bbox": [
+        600.3170166015625,
+        433.14208984375,
+        622.9337158203125,
+        456.922607421875
+      ],
+      "confidence": 0.475,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 37
+    },
+    {
+      "bbox": [
+        619.865966796875,
+        449.342529296875,
+        646.78515625,
+        475.345947265625
+      ],
+      "confidence": 0.731,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 38
+    },
+    {
+      "bbox": [
+        646.7017822265625,
+        474.5302429199219,
+        672.9649658203125,
+        501.483154296875
+      ],
+      "confidence": 0.566,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 39
+    },
+    {
+      "bbox": [
+        677.1793212890625,
+        509.7880859375,
+        704.865234375,
+        535.693115234375
+      ],
+      "confidence": 0.703,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 40
+    },
+    {
+      "bbox": [
+        711.2279052734375,
+        555.492919921875,
+        744.2789306640625,
+        588.799560546875
+      ],
+      "confidence": 0.791,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 41
+    },
+    {
+      "bbox": [
+        752.4725341796875,
+        618.4302978515625,
+        786.883544921875,
+        653.6124267578125
+      ],
+      "confidence": 0.728,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 42
+    },
+    {
+      "bbox": [
+        800.921630859375,
+        665.2808837890625,
+        840.12255859375,
+        699.9259033203125
+      ],
+      "confidence": 0.767,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 43
+    },
+    {
+      "bbox": [
+        857.7485961914062,
+        657.0966796875,
+        899.7195434570312,
+        694.124755859375
+      ],
+      "confidence": 0.729,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 44
+    },
+    {
+      "bbox": [
+        924.989501953125,
+        657.4249267578125,
+        974.01171875,
+        702.7813720703125
+      ],
+      "confidence": 0.667,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 45
+    },
+    {
+      "bbox": [
+        1009.7098388671875,
+        668.8716430664062,
+        1067.9910888671875,
+        718.5388793945312
+      ],
+      "confidence": 0.352,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 46
+    },
+    {
+      "bbox": [
+        562.7703857421875,
+        506.3673095703125,
+        594.4993896484375,
+        527.9964599609375
+      ],
+      "confidence": 0.32,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 118
+    },
+    {
+      "bbox": [
+        399.66046142578125,
+        496.947265625,
+        433.95452880859375,
+        533.4930419921875
+      ],
+      "confidence": 0.798,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 121
+    },
+    {
+      "bbox": [
+        415.80316162109375,
+        578.295654296875,
+        447.35382080078125,
+        610.9112548828125
+      ],
+      "confidence": 0.818,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 122
+    },
+    {
+      "bbox": [
+        496.741943359375,
+        320.32403564453125,
+        518.61669921875,
+        342.69757080078125
+      ],
+      "confidence": 0.473,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 126
+    },
+    {
+      "bbox": [
+        512.6917724609375,
+        286.1413879394531,
+        534.3258056640625,
+        306.4625549316406
+      ],
+      "confidence": 0.37,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 127
+    },
+    {
+      "bbox": [
+        497.77117919921875,
+        312.72882080078125,
+        513.8678588867188,
+        329.84674072265625
+      ],
+      "confidence": 0.334,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 136
+    },
+    {
+      "bbox": [
+        386.7192077636719,
+        510.704345703125,
+        407.0766296386719,
+        529.1748046875
+      ],
+      "confidence": 0.504,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 173
+    },
+    {
+      "bbox": [
+        384.0201416015625,
+        512.056640625,
+        405.3509521484375,
+        530.873779296875
+      ],
+      "confidence": 0.708,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 174
+    },
+    {
+      "bbox": [
+        381.22174072265625,
+        512.0203247070312,
+        400.35479736328125,
+        529.4940795898438
+      ],
+      "confidence": 0.703,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 175
+    },
+    {
+      "bbox": [
+        378.8663330078125,
+        512.128662109375,
+        398.723388671875,
+        530.1396484375
+      ],
+      "confidence": 0.704,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 176
+    },
+    {
+      "bbox": [
+        375.55535888671875,
+        512.75732421875,
+        396.01580810546875,
+        533.2974853515625
+      ],
+      "confidence": 0.549,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 177
+    },
+    {
+      "bbox": [
+        369.82763671875,
+        512.68505859375,
+        392.49749755859375,
+        534.28173828125
+      ],
+      "confidence": 0.598,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 178
+    },
+    {
+      "bbox": [
+        366.125,
+        514.0311889648438,
+        389.6793212890625,
+        535.0126342773438
+      ],
+      "confidence": 0.516,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 179
+    },
+    {
+      "bbox": [
+        363.5162353515625,
+        509.32904052734375,
+        385.499267578125,
+        532.4744262695312
+      ],
+      "confidence": 0.568,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 180
+    },
+    {
+      "bbox": [
+        360.9422912597656,
+        512.5056762695312,
+        382.4465026855469,
+        534.6968383789062
+      ],
+      "confidence": 0.49,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 181
+    },
+    {
+      "bbox": [
+        358.67919921875,
+        518.642578125,
+        380.885986328125,
+        539.557861328125
+      ],
+      "confidence": 0.405,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 182
+    },
+    {
+      "bbox": [
+        355.49053955078125,
+        516.0533447265625,
+        376.8516845703125,
+        538.0125732421875
+      ],
+      "confidence": 0.497,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 183
+    },
+    {
+      "bbox": [
+        352.36724853515625,
+        514.0738525390625,
+        375.99359130859375,
+        540.6790771484375
+      ],
+      "confidence": 0.269,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 184
+    },
+    {
+      "bbox": [
+        347.86993408203125,
+        519.052978515625,
+        368.74078369140625,
+        542.417236328125
+      ],
+      "confidence": 0.386,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 185
+    },
+    {
+      "bbox": [
+        344.1690673828125,
+        520.771484375,
+        367.368408203125,
+        543.0
+      ],
+      "confidence": 0.367,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 186
+    },
+    {
+      "bbox": [
+        340.765869140625,
+        521.07080078125,
+        364.3427734375,
+        543.330810546875
+      ],
+      "confidence": 0.335,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 187
+    },
+    {
+      "bbox": [
+        337.50970458984375,
+        523.34912109375,
+        360.95391845703125,
+        543.4228515625
+      ],
+      "confidence": 0.47,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 188
+    },
+    {
+      "bbox": [
+        333.65936279296875,
+        525.1319580078125,
+        353.70831298828125,
+        544.3656005859375
+      ],
+      "confidence": 0.56,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 189
+    },
+    {
+      "bbox": [
+        330.73077392578125,
+        524.655517578125,
+        351.47161865234375,
+        544.72216796875
+      ],
+      "confidence": 0.562,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 190
+    },
+    {
+      "bbox": [
+        327.2782287597656,
+        525.850341796875,
+        348.9571838378906,
+        545.970947265625
+      ],
+      "confidence": 0.568,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 191
+    },
+    {
+      "bbox": [
+        323.15167236328125,
+        526.5400390625,
+        344.36419677734375,
+        547.07421875
+      ],
+      "confidence": 0.671,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 192
+    },
+    {
+      "bbox": [
+        320.364013671875,
+        528.1060791015625,
+        342.51953125,
+        547.6600341796875
+      ],
+      "confidence": 0.748,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 193
+    },
+    {
+      "bbox": [
+        316.54107666015625,
+        528.3536376953125,
+        339.18048095703125,
+        548.5970458984375
+      ],
+      "confidence": 0.515,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 194
+    },
+    {
+      "bbox": [
+        421.71612548828125,
+        506.63714599609375,
+        451.17718505859375,
+        533.2380981445312
+      ],
+      "confidence": 0.275,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 194
+    },
+    {
+      "bbox": [
+        312.8823547363281,
+        528.9293212890625,
+        335.1178283691406,
+        550.3818359375
+      ],
+      "confidence": 0.388,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 195
+    },
+    {
+      "bbox": [
+        421.00689697265625,
+        497.3333740234375,
+        456.1529541015625,
+        539.7808837890625
+      ],
+      "confidence": 0.292,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 195
+    },
+    {
+      "bbox": [
+        309.2335205078125,
+        528.426025390625,
+        332.89874267578125,
+        550.3377685546875
+      ],
+      "confidence": 0.368,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 196
+    },
+    {
+      "bbox": [
+        305.07476806640625,
+        529.8668212890625,
+        328.45941162109375,
+        551.8734130859375
+      ],
+      "confidence": 0.779,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 197
+    },
+    {
+      "bbox": [
+        417.62432861328125,
+        500.870849609375,
+        453.55303955078125,
+        545.619140625
+      ],
+      "confidence": 0.383,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 197
+    },
+    {
+      "bbox": [
+        301.85736083984375,
+        530.2072143554688,
+        325.72479248046875,
+        552.1492309570312
+      ],
+      "confidence": 0.691,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 198
+    },
+    {
+      "bbox": [
+        420.971923828125,
+        518.5391845703125,
+        451.80517578125,
+        546.8636474609375
+      ],
+      "confidence": 0.341,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 198
+    },
+    {
+      "bbox": [
+        299.0098876953125,
+        529.7296142578125,
+        321.9559326171875,
+        552.4669189453125
+      ],
+      "confidence": 0.718,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 199
+    },
+    {
+      "bbox": [
+        294.241455078125,
+        530.435791015625,
+        318.6383056640625,
+        552.86865234375
+      ],
+      "confidence": 0.474,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 200
+    },
+    {
+      "bbox": [
+        290.85546875,
+        531.6767578125,
+        315.9169921875,
+        554.7529296875
+      ],
+      "confidence": 0.691,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 201
+    },
+    {
+      "bbox": [
+        288.0643310546875,
+        531.8110961914062,
+        311.493408203125,
+        554.8106079101562
+      ],
+      "confidence": 0.799,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 202
+    },
+    {
+      "bbox": [
+        284.72357177734375,
+        532.6563720703125,
+        308.9359130859375,
+        556.1800537109375
+      ],
+      "confidence": 0.631,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 203
+    },
+    {
+      "bbox": [
+        280.62408447265625,
+        534.263427734375,
+        305.04107666015625,
+        556.962890625
+      ],
+      "confidence": 0.51,
+      "class_id": 32,
+      "class_name": "sports ball",
+      "source": "ball",
+      "frame": 204
+    }
+  ],
+  "total_ball_detections": 56,
+  "model_run_id": "3acc1e417fad4f77bd67a95d9790d7c1"
+}

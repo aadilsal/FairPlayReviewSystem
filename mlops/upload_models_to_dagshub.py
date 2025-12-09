@@ -1,21 +1,3 @@
-"""Upload local PyTorch model files to MLflow (DagsHub) and register them.
-
-This script will:
-- Read MLflow / DagsHub connection details from environment (use .env)
-- For each provided model file, start an MLflow run, upload the file as
-  an artifact and attempt to register the artifact as an MLflow Model.
-
-Usage:
-  python mlops/upload_models_to_dagshub.py \
-      --models ./ball-yolov8s.pt:yolo-ball-detector ./yolov8s.pt:yolo-batsman-detector
-
-Or simply run without args and it will try the default repo files
-`ball-yolov8s.pt` and `yolov8s.pt` and default model names.
-
-NOTE: Ensure `.env` contains `MLFLOW_TRACKING_URI` and optional
-`MLFLOW_TRACKING_USERNAME` / `MLFLOW_TRACKING_PASSWORD` or DAGSHUB_PAT.
-Do NOT commit secrets to the repo.
-"""
 import os
 import argparse
 from pathlib import Path
