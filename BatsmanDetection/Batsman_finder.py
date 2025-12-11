@@ -1,8 +1,5 @@
 # file: Batsman_finder.py
 import numpy as np
-from person_detector import detect_persons
-from bat_detector import detect_bat
-
 # -----------------------------
 # Geometry helpers
 # -----------------------------
@@ -37,13 +34,9 @@ class BatsmanFinder:
 
     def __init__(
         self,
-        person_conf=0.5,
-        bat_conf=0.3,
         iou_thresh=0.1,
         consec_required=3,
     ):
-        self.person_conf = person_conf
-        self.bat_conf = bat_conf
         self.iou_thresh = iou_thresh
         self.consec_required = consec_required
 
@@ -58,10 +51,13 @@ class BatsmanFinder:
         self.consec_count = 0
         self.center_history = []
 
-    def process_frame(self, frame, frame_idx=None):
-
-        frame, persons = detect_persons(frame, person_conf=self.person_conf)
-        frame, bats = detect_bat(frame, conf=self.bat_conf)
+    def process_frame(self, frame, persons, bats, frame_idx=None):
+        """
+        frame: The image frame
+        persons: List of person detections passed from the pipeline
+        bats: List of bat detections passed from the pipeline
+        frame_idx: Index for metadata
+        """
 
         meta = {
             "frame_index": frame_idx,

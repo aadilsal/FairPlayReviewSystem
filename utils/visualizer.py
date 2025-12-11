@@ -43,10 +43,9 @@ def _draw_pitch_overlay(frame, far_box, near_box):
     cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
     cv2.polylines(frame, [pts], True, (0, 200, 200), 2)
 
-def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, det_pose, frame_idx):
+def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, det_bats, det_pose, frame_idx):
     """
     Draws detections + Frame Number. 
-    Removed: UI Stats, Mode, Counters.
     """
     vis_frame = frame
 
@@ -63,35 +62,50 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
     if far_wkt and near_wkt:
         _draw_pitch_overlay(vis_frame, far_wkt, near_wkt)
 
-    # 1. Draw ALL Persons (Green)
+    # 1. Draw ALL Persons (Green) + Label
     for p in det_persons:
         px, py, pw, ph, _ = p
         cv2.rectangle(vis_frame, (px, py), (px+pw, py+ph), (0, 255, 0), 2)
+        cv2.putText(vis_frame, "Person", (px, max(0, py - 5)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-    # 2. Draw Batsman (Blue/Yellow)
+    # 2. Draw Batsman (Blue) + Label
     if det_batsman_box:
         bx, by, bw, bh = det_batsman_box
-        # Use Blue always, or switch color if you want to indicate tracking state
         color = (255, 0, 0) 
         cv2.rectangle(vis_frame, (bx, by), (bx+bw, by+bh), color, 3)
-        cv2.putText(vis_frame, "Batsman", (bx, max(0, by-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        cv2.putText(vis_frame, "Batsman", (bx, max(0, by-10)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-    # 3. Draw Ball (Red)
+    # 3. Draw Bats (Magenta) + Label
+    if det_bats:
+        for b in det_bats:
+            if "box" in b:
+                bx, by, bw, bh = map(int, b["box"])
+                color = (255, 0, 255) # Magenta
+                cv2.rectangle(vis_frame, (bx, by), (bx+bw, by+bh), color, 2)
+                cv2.putText(vis_frame, "Bat", (bx, max(0, by - 5)), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+    # 4. Draw Ball (Red) + Label
     if det_ball:
         bx, by, br = int(det_ball[0]), int(det_ball[1]), int(det_ball[2])
         cv2.circle(vis_frame, (bx, by), br, (0, 0, 255), 2)
         cv2.circle(vis_frame, (bx, by), 2, (0, 0, 255), -1)
+        cv2.putText(vis_frame, "Ball", (bx + br + 5, by), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-    # 4. Draw Wickets (Orange/Green)
+    # 5. Draw Wickets (Orange/Green) + Label
     if det_wickets:
         for w in det_wickets:
             wx, wy, ww, wh = map(int, w["box"])
             lbl = w.get("label", "Wicket")
             color = (0, 140, 255) if "Far" in lbl else (0, 255, 0)
             cv2.rectangle(vis_frame, (wx, wy), (wx+ww, wy+wh), color, 2)
-            cv2.putText(vis_frame, lbl, (wx, wy-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.putText(vis_frame, lbl, (wx, wy-5), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-    # 5. Draw Pose
+    # 6. Draw Pose
     for person_kps in det_pose:
         for (i, j) in SKELETON_PAIRS:
             if i < len(person_kps) and j < len(person_kps):
@@ -104,7 +118,7 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
             if kx > 0 and ky > 0:
                 cv2.circle(vis_frame, (kx, ky), 3, (0, 255, 255), -1)
 
-    # 6. Draw Frame Number (No other HUD)
+    # 7. Draw Frame Number
     _draw_frame_info(vis_frame, frame_idx)
 
     return vis_frame
