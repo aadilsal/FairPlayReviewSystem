@@ -9,10 +9,9 @@ current_dir = os.getcwd()
 sys.path.append(current_dir) 
 sys.path.append(os.path.join(current_dir, "BallDetection"))
 sys.path.append(os.path.join(current_dir, "BatsmanDetection"))
-sys.path.append(os.path.join(current_dir, "WicketDetector"))
+sys.path.append(os.path.join(current_dir, "WicketDetection"))
 sys.path.append(os.path.join(current_dir, "Pipeline"))
 sys.path.append(os.path.join(current_dir, "utils"))
-
 
 try:
     from frame_extractor import extract_video_frames
@@ -44,9 +43,6 @@ def main():
     # Extract video name
     video_name_stem = Path(args.input).stem
     
-    # ---------------------------------------------------------
-    # NEW: Create a Unique Output Directory per Run
-    # ---------------------------------------------------------
     # Format: outputs/frames/videoName_YYYYMMDD_HHMMSS
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     unique_folder_name = f"{video_name_stem}_{timestamp}"
