@@ -23,7 +23,7 @@ def process_frames_pipeline(
     frame_paths,
     person_conf=0.5,
     bat_conf=0.3,
-    iou_thresh=0.12,
+    iou_thresh=0.05,
     consec_required=3,
     wicket_conf=0.25,
     display=True
@@ -64,7 +64,7 @@ def process_frames_pipeline(
         # ======================================================
 
         # A. Ball Detection
-        _, det_ball = detect_ball_on_frame(clean_frame.copy())
+        _, det_ball = detect_ball_on_frame(frame_idx=frame_idx, frame=clean_frame.copy())
         if det_ball:
             metadata["detections"].append({"label": "Ball", "data": det_ball})
 
@@ -78,13 +78,13 @@ def process_frames_pipeline(
         for b in det_bats:
              metadata["detections"].append({"label": "Bat", "box": b["box"], "conf": b.get("conf", 0.0)})
 
-        # D. General Person Detection
-        _, det_persons = detect_persons(clean_frame.copy(), person_conf=person_conf)
-        for p in det_persons:
-             metadata["detections"].append({"label": "Person", "box": list(p[:4]), "conf": 0.0})
-
-        # E. Batsman Logic
+        # D. Batsman Logic
         if not tracking_active:
+            # E. General Person Detection
+            _, det_persons = detect_persons(clean_frame.copy(), person_conf=person_conf)
+            for p in det_persons:
+                metadata["detections"].append({"label": "Person", "box": list(p[:4]), "conf": 0.0})
+
             # Search Mode: Pass 'det_persons' AND 'det_bats'
             _, finder_meta = batsman_finder.process_frame(
                 clean_frame.copy(), 

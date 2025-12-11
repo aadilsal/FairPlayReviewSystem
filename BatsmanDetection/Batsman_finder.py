@@ -1,5 +1,5 @@
-# file: Batsman_finder.py
 import numpy as np
+
 # -----------------------------
 # Geometry helpers
 # -----------------------------
@@ -24,7 +24,7 @@ def center_xywh(box):
 
 
 # -----------------------------
-# Batsman Finder (STRICT FSM)
+# Batsman Finder (Fixed: No Averaging)
 # -----------------------------
 
 class BatsmanFinder:
@@ -34,7 +34,7 @@ class BatsmanFinder:
 
     def __init__(
         self,
-        iou_thresh=0.1,
+        iou_thresh=0.05,
         consec_required=3,
     ):
         self.iou_thresh = iou_thresh
@@ -43,13 +43,13 @@ class BatsmanFinder:
         self.state = self.SEARCH
         self.candidate_box = None   # xywh
         self.consec_count = 0
-        self.center_history = []
         self.confirmed_bbox = None
 
     def _reset(self):
+        if self.consec_count > 0:
+            print(f"[DEBUG] RESET triggered. Counter dropped from {self.consec_count} to 0.")
         self.candidate_box = None
         self.consec_count = 0
-        self.center_history = []
 
     def process_frame(self, frame, persons, bats, frame_idx=None):
         """
@@ -64,10 +64,8 @@ class BatsmanFinder:
             "state": "CONFIRMED" if self.state == self.CONFIRMED else "SEARCH",
             "consec_count": int(self.consec_count),
             "batsman_confirmed": (self.state == self.CONFIRMED),
-            "persons": persons,
-            "bats": bats,
-            "num_persons": len(persons),
-            "num_bats": len(bats),
+            "persons": len(persons),
+            "bats": len(bats),
             "best_iou": 0.0,
         }
 
@@ -100,7 +98,7 @@ class BatsmanFinder:
             if best_person and best_iou >= self.iou_thresh:
                 self.candidate_box = best_person
                 self.consec_count = 1
-                self.center_history = [center_xywh(best_person)]
+                print(f"[DEBUG] Frame {frame_idx}: FOUND candidate! IoU={best_iou:.4f} | Count=1")
             else:
                 self._reset()
 
@@ -109,52 +107,65 @@ class BatsmanFinder:
         # --------------------------------------------------
         # 2) VERIFY — same candidate only
         # --------------------------------------------------
+        
+        # Step A: Find the candidate in the CURRENT frame's person list
+        cx, cy, cw, ch = self.candidate_box
+        old_c_xyxy = (cx, cy, cx + cw, cy + ch)
+        
+        matched_person = None
+        best_person_iou = 0.0
+        
+        for p in persons:
+            px, py, pw, ph, _ = p
+            p_xyxy = (px, py, px + pw, py + ph)
+            i = iou_xyxy(old_c_xyxy, p_xyxy)
+            if i > best_person_iou:
+                best_person_iou = i
+                matched_person = (px, py, pw, ph)
+        
+        if matched_person is None or best_person_iou < 0.1:
+            print(f"[DEBUG] Frame {frame_idx}: Lost candidate person (overlap={best_person_iou:.2f}). Resetting.")
+            self._reset()
+            return frame, meta
+
+        # ✅ Update to NEW position
+        self.candidate_box = matched_person
         px, py, pw, ph = self.candidate_box
         p_xyxy = (px, py, px + pw, py + ph)
 
-        best_iou = 0.0
+        # Step B: Check bat overlap with NEW person box
+        best_bat_iou = 0.0
         for b in bats:
             bx, by, bw, bh = b["box"]
             b_xyxy = (bx, by, bx + bw, by + bh)
             i = iou_xyxy(b_xyxy, p_xyxy)
-            best_iou = max(best_iou, i)
+            best_bat_iou = max(best_bat_iou, i)
 
-        meta["best_iou"] = float(best_iou)
+        meta["best_iou"] = float(best_bat_iou)
 
-        if best_iou >= self.iou_thresh:
+        if best_bat_iou >= self.iou_thresh:
             self.consec_count += 1
-            self.center_history.append(center_xywh(self.candidate_box))
+            print(f"[DEBUG] Frame {frame_idx}: VERIFYING... IoU={best_bat_iou:.4f} | Count={self.consec_count}/{self.consec_required}")
         else:
+            print(f"[DEBUG] Frame {frame_idx}: FAILED bat verification. IoU={best_bat_iou:.4f} < {self.iou_thresh}. Resetting.")
             self._reset()
             return frame, meta
 
         meta["consec_count"] = int(self.consec_count)
 
         # --------------------------------------------------
-        # 3) CONFIRMATION (✅ CLAMPED BOX)
+        # 3) CONFIRMATION (Using EXACT current box)
         # --------------------------------------------------
         if self.consec_count >= self.consec_required:
-            centers = np.stack(self.center_history[-self.consec_required:])
-            mean_center = centers.mean(axis=0)
-
-            h, w = frame.shape[:2]
-
-            x = int(mean_center[0] - pw / 2)
-            y = int(mean_center[1] - ph / 2)
-
-            # ✅ CLAMP TO IMAGE BOUNDS
-            x = max(0, min(x, w - 1))
-            y = max(0, min(y, h - 1))
-            pw_c = min(pw, w - x)
-            ph_c = min(ph, h - y)
-
-            final_box = (x, y, int(pw_c), int(ph_c))
-
+            print(f"[DEBUG] Frame {frame_idx}: CONFIRMED! Reached {self.consec_count} frames.")
+            
+            # ✅ FIX: Use self.candidate_box directly (The latest tight YOLO detection)
+            # No averaging, no "mean_center" lag.
             self.state = self.CONFIRMED
-            self.confirmed_bbox = final_box
+            self.confirmed_bbox = self.candidate_box 
 
             meta["state"] = "CONFIRMED"
             meta["batsman_confirmed"] = True
-            meta["batsman_bbox"] = list(map(int, final_box))
+            meta["batsman_bbox"] = list(map(int, self.confirmed_bbox))
 
         return frame, meta

@@ -29,7 +29,7 @@ def main():
     parser.add_argument('--fps', type=int, default=30, help='FPS for output video (default: 30)')
     parser.add_argument('--person-conf', type=float, default=0.5, help='Person detection confidence (default: 0.5)')
     parser.add_argument('--bat-conf', type=float, default=0.1, help='Bat detection confidence (default: 0.2)')
-    parser.add_argument('--iou-thresh', type=float, default=0.12, help='IoU threshold for bat-person overlap (default: 0.12)')
+    parser.add_argument('--iou-thresh', type=float, default=0.05, help='IoU threshold for bat-person overlap (default: 0.05)')
     parser.add_argument('--consec-frames', type=int, default=3, help='Consecutive frames required to lock batsman (default: 3)')
     parser.add_argument('--wicket-conf', type=float, default=0.25, help='Wicket detection confidence (default: 0.25)')
 

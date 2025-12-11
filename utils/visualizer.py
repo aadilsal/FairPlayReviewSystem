@@ -62,20 +62,21 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
     if far_wkt and near_wkt:
         _draw_pitch_overlay(vis_frame, far_wkt, near_wkt)
 
-    # 1. Draw ALL Persons (Green) + Label
-    for p in det_persons:
-        px, py, pw, ph, _ = p
-        cv2.rectangle(vis_frame, (px, py), (px+pw, py+ph), (0, 255, 0), 2)
-        cv2.putText(vis_frame, "Person", (px, max(0, py - 5)), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-    # 2. Draw Batsman (Blue) + Label
+    # 1. Draw Batsman (Blue) + Label
     if det_batsman_box:
         bx, by, bw, bh = det_batsman_box
         color = (255, 0, 0) 
         cv2.rectangle(vis_frame, (bx, by), (bx+bw, by+bh), color, 3)
         cv2.putText(vis_frame, "Batsman", (bx, max(0, by-10)), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    else:
+        # 2. Draw ALL Persons (Green) + Label
+        for p in det_persons:
+            px, py, pw, ph, _ = p
+            cv2.rectangle(vis_frame, (px, py), (px+pw, py+ph), (0, 255, 0), 2)
+            cv2.putText(vis_frame, "Person", (px, max(0, py - 5)), 
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
     # 3. Draw Bats (Magenta) + Label
     if det_bats:
@@ -89,11 +90,27 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
 
     # 4. Draw Ball (Red) + Label
     if det_ball:
-        bx, by, br = int(det_ball[0]), int(det_ball[1]), int(det_ball[2])
-        cv2.circle(vis_frame, (bx, by), br, (0, 0, 255), 2)
-        cv2.circle(vis_frame, (bx, by), 2, (0, 0, 255), -1)
-        cv2.putText(vis_frame, "Ball", (bx + br + 5, by), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        bx, by, br = 0, 0, 0
+        valid_ball = False
+        
+        # ✅ FIX: Handle Dictionary Format {'box': [x,y,w,h], 'conf': ...}
+        if isinstance(det_ball, dict) and "box" in det_ball:
+            x, y, w, h = det_ball["box"]
+            bx = int(x + w // 2)
+            by = int(y + h // 2)
+            br = int(max(w, h) // 2)
+            valid_ball = True
+            
+        # Handle legacy tuple format (x, y, radius) just in case
+        elif isinstance(det_ball, (list, tuple)) and len(det_ball) >= 3:
+             bx, by, br = int(det_ball[0]), int(det_ball[1]), int(det_ball[2])
+             valid_ball = True
+
+        if valid_ball:
+            cv2.circle(vis_frame, (bx, by), br, (0, 0, 255), 2)
+            cv2.circle(vis_frame, (bx, by), 2, (0, 0, 255), -1)
+            cv2.putText(vis_frame, "Ball", (bx + br + 5, by), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
     # 5. Draw Wickets (Orange/Green) + Label
     if det_wickets:
