@@ -43,7 +43,7 @@ def _draw_pitch_overlay(frame, far_box, near_box):
     cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
     cv2.polylines(frame, [pts], True, (0, 200, 200), 2)
 
-def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, det_bats, det_pose, frame_idx):
+def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, det_bats, det_pads, det_pose, frame_idx):
     """
     Draws detections + Frame Number. 
     """
@@ -74,6 +74,7 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
         # 2. Draw ALL Persons (Green) + Label
         for p in det_persons:
             px, py, pw, ph, _ = p
+            px, py, pw, ph = map(int, [px, py, pw, ph])
             cv2.rectangle(vis_frame, (px, py), (px+pw, py+ph), (0, 255, 0), 2)
             cv2.putText(vis_frame, "Person", (px, max(0, py - 5)), 
             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
@@ -88,12 +89,22 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
                 cv2.putText(vis_frame, "Bat", (bx, max(0, by - 5)), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-    # 4. Draw Ball (Red) + Label
+    # 4. Draw Pads (Cyan) + Label
+    if det_pads:
+        for p in det_pads:
+            if "box" in p:
+                px, py, pw, ph = map(int, p["box"])
+                color = (255, 255, 0) # Cyan (Yellow/Green mix)
+                cv2.rectangle(vis_frame, (px, py), (px+pw, py+ph), color, 2)
+                cv2.putText(vis_frame, "Pad", (px, max(0, py - 5)), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+    # 5. Draw Ball (Red) + Label
     if det_ball:
         bx, by, br = 0, 0, 0
         valid_ball = False
         
-        # ✅ FIX: Handle Dictionary Format {'box': [x,y,w,h], 'conf': ...}
+        # Handle Dictionary Format {'box': [x,y,w,h], 'conf': ...}
         if isinstance(det_ball, dict) and "box" in det_ball:
             x, y, w, h = det_ball["box"]
             bx = int(x + w // 2)
@@ -112,7 +123,7 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
             cv2.putText(vis_frame, "Ball", (bx + br + 5, by), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-    # 5. Draw Wickets (Orange/Green) + Label
+    # 6. Draw Wickets (Orange/Green) + Label
     if det_wickets:
         for w in det_wickets:
             wx, wy, ww, wh = map(int, w["box"])
@@ -122,7 +133,7 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
             cv2.putText(vis_frame, lbl, (wx, wy-5), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-    # 6. Draw Pose
+    # 7. Draw Pose
     for person_kps in det_pose:
         for (i, j) in SKELETON_PAIRS:
             if i < len(person_kps) and j < len(person_kps):
@@ -135,7 +146,7 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
             if kx > 0 and ky > 0:
                 cv2.circle(vis_frame, (kx, ky), 3, (0, 255, 255), -1)
 
-    # 7. Draw Frame Number
+    # 8. Draw Frame Number
     _draw_frame_info(vis_frame, frame_idx)
 
     return vis_frame

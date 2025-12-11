@@ -5,9 +5,11 @@ import json
 import numpy as np
 
 # Logic Modules
+# from exp_ball_detector import detect_ball_on_frame as detect_ball_on_frame
 from ball_detector import detect_ball_on_frame
 from pose_estimator import estimate_pose
 from person_detector import detect_persons
+from pad_detector import detect_pads
 from bat_detector import detect_bat 
 from Batsman_finder import BatsmanFinder
 from Batsman_tracker import BatsmanTracker
@@ -23,6 +25,7 @@ def process_frames_pipeline(
     frame_paths,
     person_conf=0.5,
     bat_conf=0.3,
+    pad_conf=0.3,
     iou_thresh=0.05,
     consec_required=3,
     wicket_conf=0.25,
@@ -127,6 +130,12 @@ def process_frames_pipeline(
                 _, kps = estimate_pose(clean_frame.copy(), bbox=box)
                 det_pose.extend(kps)
 
+        # G. Pad Detection 
+        det_pads = []
+        # _, det_pads = detect_pads(clean_frame.copy(), det_pose, conf=pad_conf)
+        # for p in det_pads:
+        #     metadata["detections"].append({"label": "Pad", "box": p["box"], "conf": p.get("conf", 0.0)})
+
         # ======================================================
         # 3️⃣ VISUALIZATION & OUTPUT
         # ======================================================
@@ -139,7 +148,8 @@ def process_frames_pipeline(
             det_batsman_box, 
             det_wickets, 
             det_bats,
-            det_pose, 
+            det_pads, 
+            det_pose,
             frame_idx
         )
 
