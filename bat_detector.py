@@ -2,7 +2,7 @@ from ultralytics import YOLO
 import cv2
 
 # Load your trained bat detector
-bat_model = YOLO('outputs/Bat_detection2/weights/best.pt')  # Adjust path if necessary
+bat_model = YOLO('weights/Bat_detection2/weights/best.pt')  
 
 def detect_bat(frame, conf= 0.25):  # Ensure bat_conf is a parameter
     """

@@ -2,7 +2,7 @@ import cv2
 from ultralytics import YOLO
 
 class YOLOBallDetector:
-    def __init__(self, model_path='outputs/yolov8_cricket_ball2/weights/best.pt'):
+    def __init__(self, model_path='weights/yolov8_cricket_ball2/weights/best.pt'):
         self.model = YOLO(model_path)
 
     def detect(self, img):

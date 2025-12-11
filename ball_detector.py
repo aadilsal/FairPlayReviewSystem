@@ -4,7 +4,7 @@ from ball_tracker import ball_detect
 from cvzone.ColorModule import ColorFinder
 
 # Initialize detectors once
-yolo_detector = YOLOBallDetector('outputs/yolov8_cricket_ball2/weights/best.pt')  # or your custom weights
+yolo_detector = YOLOBallDetector('weights/yolov8_cricket_ball2/weights/best.pt')  # or your custom weights
 color_finder = ColorFinder(False)
 hsv_vals = {
     "hmin": 10, "smin": 44, "vmin": 192,
