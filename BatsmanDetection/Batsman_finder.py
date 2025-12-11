@@ -24,7 +24,7 @@ def center_xywh(box):
 
 
 # -----------------------------
-# Batsman Finder (Fixed: No Averaging)
+# Batsman Finder
 # -----------------------------
 
 class BatsmanFinder:
@@ -41,13 +41,15 @@ class BatsmanFinder:
         self.consec_required = consec_required
 
         self.state = self.SEARCH
+        self.debug = False
         self.candidate_box = None   # xywh
         self.consec_count = 0
         self.confirmed_bbox = None
 
     def _reset(self):
         if self.consec_count > 0:
-            print(f"[DEBUG] RESET triggered. Counter dropped from {self.consec_count} to 0.")
+            if self.debug:
+                print(f"[DEBUG] RESET triggered. Counter dropped from {self.consec_count} to 0.")
         self.candidate_box = None
         self.consec_count = 0
 
@@ -98,7 +100,8 @@ class BatsmanFinder:
             if best_person and best_iou >= self.iou_thresh:
                 self.candidate_box = best_person
                 self.consec_count = 1
-                print(f"[DEBUG] Frame {frame_idx}: FOUND candidate! IoU={best_iou:.4f} | Count=1")
+                if self.debug:
+                    print(f"[DEBUG] Frame {frame_idx}: FOUND candidate! IoU={best_iou:.4f} | Count=1")
             else:
                 self._reset()
 
@@ -124,7 +127,8 @@ class BatsmanFinder:
                 matched_person = (px, py, pw, ph)
         
         if matched_person is None or best_person_iou < 0.1:
-            print(f"[DEBUG] Frame {frame_idx}: Lost candidate person (overlap={best_person_iou:.2f}). Resetting.")
+            if self.debug:
+                print(f"[DEBUG] Frame {frame_idx}: Lost candidate person (overlap={best_person_iou:.2f}). Resetting.")
             self._reset()
             return frame, meta
 
@@ -145,9 +149,11 @@ class BatsmanFinder:
 
         if best_bat_iou >= self.iou_thresh:
             self.consec_count += 1
-            print(f"[DEBUG] Frame {frame_idx}: VERIFYING... IoU={best_bat_iou:.4f} | Count={self.consec_count}/{self.consec_required}")
+            if self.debug:
+                print(f"[DEBUG] Frame {frame_idx}: VERIFYING... IoU={best_bat_iou:.4f} | Count={self.consec_count}/{self.consec_required}")
         else:
-            print(f"[DEBUG] Frame {frame_idx}: FAILED bat verification. IoU={best_bat_iou:.4f} < {self.iou_thresh}. Resetting.")
+            if self.debug:
+                print(f"[DEBUG] Frame {frame_idx}: FAILED bat verification. IoU={best_bat_iou:.4f} < {self.iou_thresh}. Resetting.")
             self._reset()
             return frame, meta
 
@@ -157,7 +163,8 @@ class BatsmanFinder:
         # 3) CONFIRMATION (Using EXACT current box)
         # --------------------------------------------------
         if self.consec_count >= self.consec_required:
-            print(f"[DEBUG] Frame {frame_idx}: CONFIRMED! Reached {self.consec_count} frames.")
+            if self.debug:
+                print(f"[DEBUG] Frame {frame_idx}: CONFIRMED! Reached {self.consec_count} frames.")
             
             # ✅ FIX: Use self.candidate_box directly (The latest tight YOLO detection)
             # No averaging, no "mean_center" lag.
