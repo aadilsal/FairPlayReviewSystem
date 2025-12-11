@@ -1,174 +1,311 @@
-A simple pipeline to detect and visualize a cricket ball in images or videos using Ultralytics YOLOv8 (fastest) and classic computer vision (sliding window with color optimization).
+# FairPlayReviewSystem
 
-### Requirements
+A comprehensive cricket analysis system for fair play review, featuring advanced ball detection with hybrid tracking, batsman identification and tracking, wicket detection, and pose estimation.
 
-- Python 3.9+ (recommended)
+## Features
+
+### 🏏 Advanced Ball Detection
+
+- **YOLOv8-based Detection**: Custom-trained model for cricket ball detection
+- **Hybrid Tracking System**: Combines optical flow, physics-based prediction, and post-processing interpolation
+- **Gap Filling**: Handles occlusions, bounces, and bat contact using backwards interpolation
+- **Real-time Processing**: Optimized for video analysis with configurable tracking modes
+
+### 🏃‍♂️ Batsman Detection & Tracking
+
+- **Person Detection**: YOLO-based person identification
+- **Bat Detection**: Specialized bat recognition
+- **Batsman Confirmation**: IoU-based matching of persons and bats
+- **Pose Estimation**: Keypoint detection for batsman analysis
+
+### 🎯 Wicket Detection
+
+- **Multi-class Detection**: Stumps, bails, and wicket components
+- **High Accuracy**: Fine-tuned for cricket-specific scenarios
+
+### 📊 Pipeline Integration
+
+- **End-to-end Processing**: Frame extraction, detection, tracking, and visualization
+- **Metadata Output**: JSON metadata for each frame with detections
+- **Video Reconstruction**: Processed frames compiled back to video
+
+## Requirements
+
+- Python 3.9+
 - Windows, macOS, or Linux
-- GPU optional (CUDA recommended for speed)
+- GPU recommended (CUDA for YOLO acceleration)
+- 8GB+ RAM for video processing
 
-  ### work done so far
-
-  - ball detection
-  - person detection + exoskeletan
-  - frame extraction
-  - detection pipeline made of the existing models
-  
-
-
-### Setup
+## Installation
 
 ```bash
-# Clone
+# Clone repository
 git clone <your-repo-url>
-cd "APNA PROJECT"
+cd FairPlayReviewSystem
 
-# Create and activate venv (Windows PowerShell)
+# Create virtual environment
 python -m venv .venv
+# Windows
 .\.venv\Scripts\Activate.ps1
-
-# Or (macOS/Linux)
-# python3 -m venv .venv
-# source .venv/bin/activate
-
-# Install deps
-pip install -r requirements.txt
-```
-
-### Quick Start
-
-```bash
-python main.py -i test_videos/vid1.mp4 -m yolo_direct --fps 2
-```
-
-````bash
-## Cricket Ball Detection – YOLOv8 + Color-Based Fallback
-
-Detect and visualize cricket balls in images or videos using a custom-trained Ultralytics YOLOv8 model and classic color-based computer vision as fallback.
-
-### Requirements
-
-- Python 3.13+ (recommended)
-- Windows, macOS, or Linux
-- GPU optional (CUDA recommended for speed)
-
-### Setup
-
-```bash
-# Clone
-git clone <your-repo-url>
-cd "APNA PROJECT"
-
-# Create and activate venv (Windows PowerShell)
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Or (macOS/Linux)
-# python3 -m venv .venv
-# source .venv/bin/activate
+# macOS/Linux
+source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
-````
-
-### Dataset Download
-
-Download the cricket ball dataset using kagglehub:
-
-```python
-import kagglehub
-path = kagglehub.dataset_download("kushagra3204/cricket-ball-dataset-for-yolo")
 ```
 
-Copy the dataset into your workspace as `cricket_ball_data` and ensure it contains `train`, `valid`, and `test` folders with `images` and `labels` subfolders.
+## Quick Start
 
-### Training YOLOv8
+### Batsman Tracking (Main Pipeline)
 
-Train the custom YOLOv8 model:
+```bash
+python main.py --input test_videos/sample.mp4 --fps 30 --person-conf 0.5 --bat-conf 0.1
+```
+
+### Ball Detection Only
+
+```python
+from BallDetection.ball_detector import detect_ball_on_frame
+import cv2
+
+frame = cv2.imread('frame.jpg')
+_, ball_info = detect_ball_on_frame(frame, frame_idx=0)
+if ball_info:
+    print(f"Ball detected: {ball_info}")
+```
+
+## Project Structure
+
+```
+FairPlayReviewSystem/
+├── main.py                          # Main CLI for batsman tracking pipeline
+├── detection_pipeline.py            # Integrated detection pipeline
+├── detection_pipeline.py            # Ball detection with hybrid tracking
+├── BallDetection/
+│   ├── ball_detector.py             # Core ball detection with YOLO + hybrid tracking
+│   ├── yolo_detect.py               # YOLO wrapper
+│   ├── preprocessing.py             # Frame enhancement
+│   └── ...
+├── BatsmanDetection/
+│   ├── person_detector.py           # Person detection
+│   ├── bat_detector.py              # Bat detection
+│   ├── Batsman_finder.py            # Batsman identification logic
+│   ├── Batsman_tracker.py           # KCF-based tracking
+│   └── pose_estimator.py            # Pose estimation
+├── WicketDetection/
+│   └── wicket_detector.py           # Wicket detection
+├── utils/
+│   ├── frame_extractor.py           # Video to frames
+│   ├── video_utils.py               # Frames to video
+│   └── visualizer.py                # Result visualization
+├── weights/                         # Pre-trained model weights
+├── outputs/                         # Processing results
+└── requirements.txt                 # Python dependencies
+```
+
+## Ball Detection Details
+
+### Detection Methods
+
+1. **YOLOv8 Detection**: Primary detection using custom-trained model
+2. **Optical Flow Tracking**: For motion blur scenarios
+3. **Physics Prediction**: Projectile motion for occlusions
+4. **Post-processing Interpolation**: Backwards gap filling for bounces/deflections
+
+### Configuration
+
+```python
+DETECTION_CONFIG = {
+    'conf_threshold': 0.2,
+    'use_hybrid_tracking': True,
+    'optical_flow_quality_threshold': 0.7,
+    'physics_prediction_max_frames': 5,
+    'gravity_constant': 0.5,
+    'use_optical_flow': True,
+    # ... more options
+}
+```
+
+### Output Format
+
+```python
+ball_info = {
+    "box": [x, y, w, h],
+    "conf": float,  # Positive for YOLO, negative for predictions
+    "source": "yolo" | "optical_flow" | "physics" | "interpolated_*",
+    "velocity": [vx, vy]
+}
+```
+
+### Post-processing
+
+```python
+from BallDetection.ball_detector import TrajectoryPostProcessor
+
+post_processor = TrajectoryPostProcessor()
+corrected_results = post_processor.process_trajectory(frame_results)
+```
+
+## CLI Usage
+
+### Main Pipeline
+
+```bash
+python main.py [options]
+
+Options:
+  --input, -i          Input video path (required)
+  --output, -o         Output directory (default: outputs/frames)
+  --fps                Output FPS (default: 30)
+  --person-conf        Person detection confidence (default: 0.5)
+  --bat-conf           Bat detection confidence (default: 0.1)
+  --iou-thresh         IoU threshold for bat-person matching (default: 0.05)
+  --consec-frames      Consecutive frames for batsman confirmation (default: 3)
+  --wicket-conf        Wicket detection confidence (default: 0.25)
+```
+
+### Example
+
+```bash
+python main.py -i test_videos/cricket_match.mp4 -o outputs/match1 --fps 25 --person-conf 0.6
+```
+
+## Output Structure
+
+```
+outputs/
+└── frames/
+    └── video_name_YYYYMMDD_HHMMSS/
+        ├── frame_000001.jpg      # Processed frame with annotations
+        ├── frame_000001.json     # Detection metadata
+        ├── frame_000002.jpg
+        ├── ...
+        └── video_name_output.mp4 # Reconstructed video
+```
+
+### Metadata Format
+
+```json
+{
+  "frame_index": 0,
+  "tracking_active": true,
+  "detections": [
+    {
+      "label": "Ball",
+      "data": {
+        "box": [100, 200, 50, 50],
+        "conf": 0.85,
+        "source": "yolo"
+      }
+    },
+    {
+      "label": "Batsman",
+      "box": [300, 150, 80, 200],
+      "tracked": true
+    }
+  ]
+}
+```
+
+## Training Custom Models
+
+### Ball Detection Model
 
 ```python
 from ultralytics import YOLO
-YOLO('yolov8n.pt').train(data='cricket_ball_data/data.yaml', epochs=50, imgsz=640, project='outputs', name='yolov8_cricket_ball')
+
+# Train YOLOv8
+model = YOLO('yolov8n.pt')
+model.train(
+    data='cricket_ball_data/data.yaml',
+    epochs=50,
+    imgsz=640,
+    project='weights',
+    name='yolov8_cricket_ball'
+)
 ```
 
-### Running Detection
+### Dataset Structure
 
-Run detection on a video:
-
-```bash
-python main.py
+```
+cricket_ball_data/
+├── train/
+│   ├── images/
+│   └── labels/
+├── valid/
+│   ├── images/
+│   └── labels/
+└── data.yaml
 ```
 
-The pipeline will use your trained YOLOv8 model (`outputs/yolov8_cricket_ball2/weights/best.pt`) for detection, falling back to color-based detection if needed.
-python main.py -i outputs/frames/frame_0000.jpg -m yolo_direct
+## Advanced Usage
 
-````
+### Custom Ball Detection
 
-- Classic but still quick (color optimized):
+```python
+from BallDetection.ball_detector import detect_ball_on_frame, TrajectoryPostProcessor
 
-```bash
-python main.py -i test_videos/vid1.mp4 -m color_optimized --fps 2
-````
+# Process frames
+frame_results = []
+for idx, frame in enumerate(video_frames):
+    _, ball_info = detect_ball_on_frame(frame, frame_idx=idx)
+    frame_results.append({
+        'frame_idx': idx,
+        'position': ball_info['box'][:2] if ball_info else None,
+        'conf': ball_info['conf'] if ball_info else 0.0,
+        'source': ball_info['source'] if ball_info else 'none'
+    })
 
-### CLI Usage
-
-```bash
-python main.py --input <path> [--methods <list>] [--fps <int>] [--model <weights>] [--output <dir>] [--report]
+# Post-process for gap filling
+post_processor = TrajectoryPostProcessor()
+corrected_results = post_processor.process_trajectory(frame_results)
 ```
 
-- **--input/-i**: image or video path
-- **--methods/-m**: one or more of `sliding_window`, `color_optimized`, `yolo_direct`
-- **--fps**: frame extraction fps for video (lower = faster overall)
-- **--model**: YOLO weights path (default `yolov8n.pt` – auto-downloads)
-- **--output/-o**: output root directory (default `outputs`)
-- **--report**: save a run summary report
+### Visualization
 
-Examples:
-
-```bash
-# YOLO direct (fastest end-to-end)
-python main.py -i test_videos/vid1.mp4 -m yolo_direct --fps 2
-
-# Sliding window (classic CV)
-python main.py -i test_videos/vid1.mp4 -m sliding_window --fps 2
-
-# Run multiple methods in one go
-python main.py -i test_videos/vid1.mp4 -m yolo_direct color_optimized --fps 2 --report
+```python
+post_processor.visualize_corrections(
+    frame_results,
+    corrected_results,
+    "trajectory_correction.png"
+)
 ```
 
-### Output Locations
+## Troubleshooting
 
-- Processed frames: `outputs/video/<method>/processed_frame_*.jpg`
-- Composited video: `outputs/video/output_<method>.mp4`
-- Single image results: `outputs/images/<name>_<method>.jpg`
-- Report (if `--report`): `outputs/detection_report.txt`
+### Common Issues
 
-### Project Structure
+- **CUDA not available**: Install PyTorch with CUDA support
+- **Model download fails**: Check internet connection for Ultralytics
+- **Memory errors**: Reduce batch size or use CPU mode
+- **Tracking fails**: Adjust confidence thresholds
 
-- `main.py`: CLI and pipeline orchestration
-- `frame_extractor.py`: video → frames
-- `ball_detect.py`: detection logic (YOLO direct and sliding window)
-- `outputs/`: results (kept via `.gitkeep`, ignored by git otherwise)
-- `test_videos/`: sample videos (ignored by git)
-- `requirements.txt`: Python dependencies
+### Performance Tips
 
-### Methods
+- Use GPU for YOLO inference
+- Lower FPS for faster processing
+- Enable hybrid tracking for better accuracy
+- Use post-processing for gap filling
 
-- **yolo_direct**: Runs YOLOv8 on full frame. Fastest and simplest.
-- **color_optimized**: Sliding window constrained by color segmentation (faster than full sliding window).
-- **sliding_window**: Full classic sliding window + YOLO on windows (slowest, for experimentation).
+## Dependencies
 
-### Tips & Troubleshooting
+- OpenCV: Computer vision operations
+- Ultralytics YOLOv8: Object detection
+- PyTorch: Deep learning framework
+- NumPy: Numerical computations
+- SciPy: Scientific computing (interpolation)
 
-- GPU check:
+## License
 
-```bash
-python -c "import torch; print(torch.cuda.is_available())"
-```
+Academic and demonstration use. Check individual component licenses (Ultralytics, PyTorch, OpenCV).
 
-- If Ultralytics downloads weights on first run, allow network access.
-- If OpenCV fails to show windows in headless envs, rely on saved images/videos under `outputs/`.
-- If performance is slow, lower `--fps` for video or prefer `-m yolo_direct`.
+## Contributing
 
-### License
+1. Fork the repository
+2. Create feature branch
+3. Add tests for new functionality
+4. Submit pull request
 
-For academic/demo use. Review upstream licenses for Ultralytics, PyTorch, and OpenCV.
+## Citation
+
+If used in research, please cite the Ultralytics YOLOv8 paper and relevant computer vision works.
