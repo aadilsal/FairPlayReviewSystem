@@ -1,20 +1,38 @@
 import argparse
 import os
+import time
+import shutil
+import sys
 from pathlib import Path
-from frame_extractor import extract_video_frames
-from detection_pipeline import process_frames_pipeline
-from video_utils import frames_to_video_with_custom_path
+
+current_dir = os.getcwd()
+sys.path.append(current_dir) 
+sys.path.append(os.path.join(current_dir, "BallDetection"))
+sys.path.append(os.path.join(current_dir, "BatsmanDetection"))
+sys.path.append(os.path.join(current_dir, "WicketDetector"))
+sys.path.append(os.path.join(current_dir, "Pipeline"))
+sys.path.append(os.path.join(current_dir, "utils"))
+
+
+try:
+    from frame_extractor import extract_video_frames
+    from video_utils import frames_to_video_with_custom_path
+    from detection_pipeline import process_frames_pipeline 
+except ImportError as e:
+    print(f"[CRITICAL ERROR] Could not import project modules: {e}")
+    print("Ensure you are running the script from the root directory 'FairPlayReviewSystem'.")
+    sys.exit(1)
 
 def main():
     parser = argparse.ArgumentParser(description='FairPlayReviewSystem - Batsman Detection & Tracking')
     parser.add_argument('--input', '-i', required=True, help='Path to input video file')
-    parser.add_argument('--output', '-o', default='outputs/frames', help='Output directory (default: outputs)')
+    parser.add_argument('--output', '-o', default='outputs/frames', help='Base Output directory (default: outputs/frames)')
     parser.add_argument('--fps', type=int, default=30, help='FPS for output video (default: 30)')
     parser.add_argument('--person-conf', type=float, default=0.5, help='Person detection confidence (default: 0.5)')
-    parser.add_argument('--bat-conf', type=float, default=0.2, help='Bat detection confidence (default: 0.3)')
+    parser.add_argument('--bat-conf', type=float, default=0.2, help='Bat detection confidence (default: 0.2)')
     parser.add_argument('--iou-thresh', type=float, default=0.12, help='IoU threshold for bat-person overlap (default: 0.12)')
     parser.add_argument('--consec-frames', type=int, default=3, help='Consecutive frames required to lock batsman (default: 3)')
-    #parser.add_argument('--pos-tolerance', type=int, default=50, help='Position tolerance in pixels (default: 50)')
+    parser.add_argument('--wicket-conf', type=float, default=0.25, help='Wicket detection confidence (default: 0.25)')
 
     args = parser.parse_args()
 
@@ -23,21 +41,26 @@ def main():
         print(f"[ERROR] Input video file not found: {args.input}")
         return
 
-    # create output directory
-    if not os.path.exists(args.output):
-        output_dir = Path(args.output)
-        output_dir.mkdir(parents=True, exist_ok=True)
+    # Extract video name
+    video_name_stem = Path(args.input).stem
     
-
-    # extract video name (without extension)
-    video_name = Path(args.input).stem
-    frames_dir = Path(args.output) / video_name
-    if not os.path.exists(frames_dir):
-        frames_dir.mkdir(parents=True, exist_ok=True)
-        
+    # ---------------------------------------------------------
+    # NEW: Create a Unique Output Directory per Run
+    # ---------------------------------------------------------
+    # Format: outputs/frames/videoName_YYYYMMDD_HHMMSS
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    unique_folder_name = f"{video_name_stem}_{timestamp}"
     
+    # The full path to the new unique directory
+    frames_dir = Path(args.output) / unique_folder_name
+    
+    # Create the directory
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[INFO] Created new output directory: {frames_dir}")
+    # ---------------------------------------------------------
 
     print(f"[INFO] Extracting frames from {args.input}...")
+    # Now passing the unique 'frames_dir'
     frame_paths_result = extract_video_frames(args.input, str(frames_dir), args.fps)
 
     # Always build a deterministic, sorted list of frame files from frames_dir
@@ -51,7 +74,7 @@ def main():
     print(f"  - Bat confidence: {args.bat_conf}")
     print(f"  - IoU threshold: {args.iou_thresh}")
     print(f"  - Consecutive frames required: {args.consec_frames}")
-    #print(f"  - Position tolerance: {args.pos_tolerance} px")
+    print(f"  - Wicket confidence: {args.wicket_conf}")
 
     # run detection pipeline with arguments
     process_frames_pipeline(
@@ -59,13 +82,14 @@ def main():
         person_conf=args.person_conf,
         bat_conf=args.bat_conf,
         iou_thresh=args.iou_thresh,
-        consec_required=args.consec_frames
+        consec_required=args.consec_frames,
+        wicket_conf=args.wicket_conf
     )
 
     print(f"[INFO] Detection pipeline completed.")
 
     print(f"[INFO] Creating output video...")
-    output_video_path = frames_dir / f"{video_name}_output.mp4"
+    output_video_path = frames_dir / f"{video_name_stem}_output.mp4"
     frames_to_video_with_custom_path(str(frames_dir), str(output_video_path), args.fps)
     print(f"[INFO] Output video saved to {output_video_path}")
 
