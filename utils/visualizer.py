@@ -15,11 +15,15 @@ SKELETON_PAIRS = [
     (5, 11), (6, 12)     # torso
 ]
 
-def _draw_frame_info(frame, frame_idx):
-    """Draws only the frame number in the top-left corner"""
+def _draw_frame_info(frame, frame_idx, pitch_status=None):
+    """Draws the frame number and optional pitch status in the top-left corner"""
     text = f"Frame: {frame_idx}"
-    cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
+    cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
                 0.7, (0, 0, 255), 2, cv2.LINE_AA)
+    if pitch_status:
+        status_text = f"Pitch: {pitch_status}"
+        cv2.putText(frame, status_text, (10, 55), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7, (0, 255, 255), 2, cv2.LINE_AA)
 
 def _draw_pitch_overlay(frame, far_box, near_box):
     """Draws pitch area"""
@@ -43,7 +47,69 @@ def _draw_pitch_overlay(frame, far_box, near_box):
     cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
     cv2.polylines(frame, [pts], True, (0, 200, 200), 2)
 
-def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, det_bats, det_pads, det_pose, frame_idx):
+
+def _draw_pitch_model_overlay(frame, pitch_model, fill=True):
+    if not pitch_model:
+        return
+    left_line = pitch_model.get("left_line")
+    right_line = pitch_model.get("right_line")
+    y_top = pitch_model.get("top_y")
+    y_bottom = pitch_model.get("bottom_y")
+    polygon = pitch_model.get("polygon")
+    if left_line is None or right_line is None or y_top is None or y_bottom is None:
+        return
+
+    a_left, b_left = left_line
+    a_right, b_right = right_line
+    h, w = frame.shape[:2]
+    y_top = int(max(0, min(h - 1, y_top)))
+    y_bottom = int(max(0, min(h - 1, y_bottom)))
+    if y_bottom <= y_top:
+        return
+
+    x_left_top = int(max(0, min(w - 1, a_left * y_top + b_left)))
+    x_left_bottom = int(max(0, min(w - 1, a_left * y_bottom + b_left)))
+    x_right_top = int(max(0, min(w - 1, a_right * y_top + b_right)))
+    x_right_bottom = int(max(0, min(w - 1, a_right * y_bottom + b_right)))
+
+    if polygon:
+        pts = np.array(polygon, np.float32)
+        pts[:, 0] = np.clip(pts[:, 0], 0, w - 1)
+        pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
+        pts = pts.astype(np.int32).reshape((-1, 1, 2))
+    else:
+        pts = np.array([
+            [x_left_top, y_top],
+            [x_right_top, y_top],
+            [x_right_bottom, y_bottom],
+            [x_left_bottom, y_bottom]
+        ], np.int32).reshape((-1, 1, 2))
+
+    overlay = frame.copy()
+    if fill:
+        cv2.fillPoly(overlay, [pts], (255, 255, 0))
+        cv2.addWeighted(overlay, 0.18, frame, 0.82, 0, frame)
+
+    color = (255, 255, 0)
+    thickness = 4
+    cv2.polylines(frame, [pts], True, color, thickness)
+    cv2.line(frame, (x_left_top, y_top), (x_right_top, y_top), color, thickness)
+    cv2.line(frame, (x_left_bottom, y_bottom), (x_right_bottom, y_bottom), color, thickness)
+    cv2.line(frame, (x_left_top, y_top), (x_left_bottom, y_bottom), color, thickness)
+    cv2.line(frame, (x_right_top, y_top), (x_right_bottom, y_bottom), color, thickness)
+    conf = pitch_model.get("confidence", None)
+    if conf is not None:
+        cv2.putText(
+            frame,
+            f"Pitch OK ({conf:.2f})",
+            (max(10, x_left_top), max(20, y_top - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 0),
+            2
+        )
+
+def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, det_bats, det_pads, det_pose, frame_idx, pitch_model=None, pitch_status=None, wicket_line=None, lbw_decision=None, lbw_status=None):
     """
     Draws detections + Frame Number. 
     """
@@ -61,6 +127,61 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
                 near_wkt = w["box"]
     if far_wkt and near_wkt:
         _draw_pitch_overlay(vis_frame, far_wkt, near_wkt)
+
+    _draw_pitch_model_overlay(vis_frame, pitch_model, fill=True)
+    if det_ball and isinstance(det_ball, dict):
+        trajectory = det_ball.get("trajectory")
+        if trajectory:
+            pts = np.array(trajectory, dtype=np.int32).reshape((-1, 1, 2))
+            if len(pts) > 1:
+                cv2.polylines(vis_frame, [pts], False, (0, 255, 255), 2, cv2.LINE_AA)
+
+        state = det_ball.get("state")
+        if state:
+            bounce_point = state.get("bounce_point")
+            impact_point = state.get("impact_point")
+            hit_point = state.get("hit_point")
+            post_path = state.get("post_impact_path")
+
+            if bounce_point:
+                bx, by = int(bounce_point[0]), int(bounce_point[1])
+                cv2.circle(vis_frame, (bx, by), 6, (0, 255, 255), 2)
+                cv2.putText(vis_frame, "Bounce", (bx + 6, by - 6),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+            if impact_point:
+                ix, iy = int(impact_point[0]), int(impact_point[1])
+                cv2.circle(vis_frame, (ix, iy), 6, (0, 0, 255), 2)
+                cv2.putText(vis_frame, "Impact", (ix + 6, iy - 6),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            if post_path:
+                pts = np.array(post_path, dtype=np.int32).reshape((-1, 1, 2))
+                if len(pts) > 1:
+                    cv2.polylines(vis_frame, [pts], False, (255, 255, 0), 2, cv2.LINE_AA)
+            if hit_point:
+                hx, hy = int(hit_point[0]), int(hit_point[1])
+                cv2.circle(vis_frame, (hx, hy), 6, (0, 255, 0), 2)
+                cv2.putText(vis_frame, "Stumps", (hx + 6, hy - 6),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    if wicket_line:
+        x = int(wicket_line.get("x", 0))
+        y_top = int(wicket_line.get("y_top", 0))
+        y_bottom = int(wicket_line.get("y_bottom", 0))
+        h, w = vis_frame.shape[:2]
+        x = max(0, min(w - 1, x))
+        y_top = max(0, min(h - 1, y_top))
+        y_bottom = max(0, min(h - 1, y_bottom))
+        if y_bottom > y_top:
+            cv2.line(vis_frame, (x, y_top), (x, y_bottom), (0, 255, 255), 4)
+            cv2.putText(vis_frame, "Wicket Line", (max(10, x - 40), max(20, y_top - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+    if lbw_status or lbw_decision:
+        status_text = f"LBW: {lbw_decision or 'NO DECISION'}"
+        if lbw_status:
+            status_text = f"LBW: {lbw_status}"
+        cv2.putText(vis_frame, status_text, (10, 80), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7, (0, 0, 255), 2, cv2.LINE_AA)
 
 
     # 1. Draw Batsman (Blue) + Label
@@ -147,6 +268,6 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
                 cv2.circle(vis_frame, (kx, ky), 3, (0, 255, 255), -1)
 
     # 8. Draw Frame Number
-    _draw_frame_info(vis_frame, frame_idx)
+    _draw_frame_info(vis_frame, frame_idx, pitch_status=pitch_status)
 
     return vis_frame

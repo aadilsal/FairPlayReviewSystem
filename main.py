@@ -1,7 +1,6 @@
 import argparse
 import os
 import time
-import shutil
 import sys
 from pathlib import Path
 
@@ -14,8 +13,8 @@ sys.path.append(os.path.join(current_dir, "Pipeline"))
 sys.path.append(os.path.join(current_dir, "utils"))
 
 try:
-    from frame_extractor import extract_video_frames
-    from video_utils import frames_to_video_with_custom_path
+    from utils.frame_extractor import extract_video_frames
+    from utils.video_utils import frames_to_video_with_custom_path
     from detection_pipeline import process_frames_pipeline 
 except ImportError as e:
     print(f"[CRITICAL ERROR] Could not import project modules: {e}")

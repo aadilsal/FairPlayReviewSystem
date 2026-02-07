@@ -378,3 +378,52 @@ def detect_wicket(frame, conf=0.25):
     if _tracker_v5 is None:
         _tracker_v5 = WicketTrackerV5(min_det_conf=conf)
     return _tracker_v5.detect_and_track(frame, conf)
+
+
+class WicketLineEstimator:
+    def __init__(self, warmup_frames=12, min_samples=6):
+        self.warmup_frames = warmup_frames
+        self.min_samples = min_samples
+        self._samples = []
+        self._model = None
+        self._ready = False
+
+    def add_detections(self, dets):
+        if self._ready:
+            return self._model
+        if not dets:
+            return None
+        for det in dets:
+            if det.get("label") == "Wicket_Near":
+                x, y, w, h = det.get("box", [0, 0, 0, 0])
+                cx = float(x + w * 0.5)
+                y_top = float(y)
+                y_bottom = float(y + h)
+                self._samples.append((cx, y_top, y_bottom))
+        if len(self._samples) < self.min_samples:
+            return None
+        if len(self._samples) >= self.warmup_frames:
+            self._compute_model()
+        return self._model
+
+    def _compute_model(self):
+        xs = np.array([s[0] for s in self._samples], dtype=np.float32)
+        y_tops = np.array([s[1] for s in self._samples], dtype=np.float32)
+        y_bottoms = np.array([s[2] for s in self._samples], dtype=np.float32)
+        x = float(np.median(xs))
+        y_top = float(np.median(y_tops))
+        y_bottom = float(np.median(y_bottoms))
+        if y_bottom < y_top:
+            y_top, y_bottom = y_bottom, y_top
+        self._model = {
+            "x": x,
+            "y_top": y_top,
+            "y_bottom": y_bottom
+        }
+        self._ready = True
+
+    def is_ready(self):
+        return self._ready
+
+    def get_model(self):
+        return self._model

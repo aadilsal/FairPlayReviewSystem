@@ -170,6 +170,44 @@ Options:
 python main.py -i test_videos/cricket_match.mp4 -o outputs/match1 --fps 25 --person-conf 0.6
 ```
 
+## Coordinate System (Project-Wide)
+
+To prevent axis mismatches, all modules use the same image-space convention:
+
+- Origin is the top-left of the frame.
+- +x increases to the right.
+- +y increases downward.
+- Gravity acts in +y (downward) and is positive.
+- Ball delivery direction (bowler -> batsman) is assumed to be +x.
+
+If your footage has the opposite delivery direction, flip frames horizontally (or mirror inputs) before running the pipeline. No camera calibration or real-world units are required; all logic uses pixel-space consistency only.
+
+## Locked Physics Parameters
+
+Stability > perfection. These values are fixed for all matches and must not be tuned per video. Update only in code when recalibrating the system.
+
+- Gravity (pixels/frame^2): `BallKalmanFilter.gravity` (default 0.5)
+- Bounce damping: `DETECTION_CONFIG['bounce_damping']`
+- Pitch clamp margin: `DETECTION_CONFIG['pitch_margin']`
+- Max velocity: `DETECTION_CONFIG['max_velocity']`
+- Min upward velocity pre-bounce: `DETECTION_CONFIG['min_upward_velocity']`
+- Measurement gates: `DETECTION_CONFIG['yolo_gate_px']`, `['optical_gate_px']`, `['csrt_gate_px']`
+- Measurement noise scales: `DETECTION_CONFIG['yolo_noise_scale']`, `['optical_noise_scale']`, `['csrt_noise_scale']`
+- Physics horizon: `DETECTION_CONFIG['physics_prediction_horizon']`
+
+## Stress Test Checklist (Manual)
+
+Run these edge cases to verify stable behavior before release:
+
+- No ball visible for the first 10 frames (tracker must not hallucinate).
+- Ball visible then fully occluded for 5-10 frames (physics-only horizon respected).
+- Fast, low skid along pitch (no false bounce; clamp above pitch).
+- Steep bounce (single bounce only).
+- Ball moving right-to-left (should be rejected or clamped as non-physical).
+- Impact near batsman ROI with detection dropout (impact still inferred).
+- Post-impact prediction intersects wicket line (stumps hit detected).
+- Post-impact prediction misses wicket line (NOT OUT / NO DECISION as appropriate).
+
 ## Output Structure
 
 ```

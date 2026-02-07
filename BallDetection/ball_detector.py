@@ -1,749 +1,854 @@
+"""Coordinate system (image-space, pixels):
+- Origin at top-left.
+- +x to the right, +y down.
+- Gravity acts in +y.
+- Delivery direction (bowler -> batsman) is +x by convention.
+"""
+
 import cv2
 import logging
-import os
 import numpy as np
+import math
+from dataclasses import dataclass
 from typing import Tuple, Optional, List, Dict, Any
-import scipy.interpolate
 
-# 1. IMPORT PREPROCESSING (The missing link)
+# Optional Imports
 try:
     from preprocessing import preprocess_frame
 except ImportError:
-    print("[WARN] preprocessing.py not found. Using raw frames.")
     preprocess_frame = None
 
-# Ensure you have this file or adjust import
-from yolo_detect import YOLOBallDetector 
+try:
+    from trajectory_fitting import fit_trajectory, detect_events_from_trajectory
+except ImportError:
+    fit_trajectory = None
+    detect_events_from_trajectory = None
+
+try:
+    from yolo_detect import YOLOBallDetector
+except ImportError:
+    YOLOBallDetector = None
+
+try:
+    from kalman_filter import BallKalmanFilter
+except ImportError:
+    BallKalmanFilter = None
+
+try:
+    from pitch_plane import PitchPlaneEstimator
+except ImportError:
+    PitchPlaneEstimator = None
 
 logger = logging.getLogger(__name__)
 
-# Initialize detectors once
-_yolo_detector = None
-
-# 2. RELAXED CONFIGURATION (Optimized for Cricket/Sports)
+# CONFIGURATION
+# Locked physics parameters: edit here only; no per-video tuning.
 DETECTION_CONFIG = {
     'conf_threshold': 0.2,
     'iou_threshold': 0.45,
     'imgsz': 640,
-    'min_area': 20,               # ✅ FIX: Reduced to 20 to catch small/far balls
+    'min_area': 20,
     'max_area': 4000,
-    'aspect_ratio_min': 0.5,      # ✅ FIX: Lowered to 0.5 for motion blur
-    'aspect_ratio_max': 2.5,      # ✅ FIX: Increased to 2.5 for elongated blur
-    'ball_color': 'red',          # ✅ FIX: Default to 'red' (change to 'white' if needed)
-    'enable_preprocessing': True, # ✅ FIX: Enabled by default
-    'enable_color_filter': False, # ✅ FIX: Disabled initially to avoid false negatives
-    'color_threshold': 0.2,
-    'enable_motion_tracking': True,
-    'min_velocity': 1,            # ✅ FIX: Low velocity allowed
-    'max_trajectory_deviation': 100,
-    'use_hybrid_tracking': True,  # ✅ NEW: Enable hybrid tracking by default
-    'optical_flow_quality_threshold': 0.7,  # Threshold for quality score
-    'physics_prediction_max_frames': 5,     # Max frames for physics prediction
-    'gravity_constant': 0.5,                # pixels/frame²
-    'velocity_window_size': 5,              # Frames for velocity calculation
+    'aspect_ratio_min': 0.5,
+    'aspect_ratio_max': 2.5,
+    'bootstrap_frames': 5,          # Require one more frame of consistency
+    'bootstrap_conf_threshold': 0.4, # Stricter conf for initial lock
+    'min_bootstrap_motion': 3.0,     # Must move at least 3 pixels between frames to lock
+    'optical_flow_quality_threshold': 0.7,
+    'max_drift_pixels': 20,
+    'drift_check_interval': 12,
+    'roi_margin': 50,
+    'max_coast_frames': 25,
+    'stuck_detection_threshold': 5.0,
+    'stuck_frames': 8,
+    'min_velocity_flight': 2.0,
+    'max_velocity': 200.0,
+    'kalman_diverrence_threshold': 80.0,
+    'recovery_roi_size': 300,
+    'yolo_recovery_conf': 0.15,
+    'min_downward_velocity': 4.0,
+    'min_upward_velocity': 1.5,
+    'pitch_warmup_frames': 10,
+    'pitch_variance_threshold': 12.0,
+    'pitch_min_static_ratio': 0.45,
+    'pitch_prefer_lower_half': 0.55,
+    'pitch_texture_threshold': 18.0,
+    'pitch_edge_low': 40,
+    'pitch_edge_high': 140,
+    'pitch_margin': 2.0,
+    'bounce_damping': 0.75,
+    'fit_window': 12,
+    'max_fit_gap': 5,
+    'fit_residual_threshold': 35.0,
+    'yolo_gate_px': 70.0,
+    'optical_gate_px': 45.0,
+    'csrt_gate_px': 25.0,
+    'yolo_noise_scale': 1.0,
+    'optical_noise_scale': 2.5,
+    'csrt_noise_scale': 6.0,
+    'guided_noise_scale': 4.0,
+    'high_confidence': 0.65,
+    'confidence_decay': 0.03,
+    'min_confidence': 0.2,
+    'max_physics_violations': 5,
+    'physics_prediction_horizon': 10,
+    'impact_no_measurement_frames': 3,
+    'impact_roi_margin': 12,
+    'post_impact_predict_frames': 120,
 }
 
-# Post-processing configuration
-POSTPROCESS_CONFIG = {
-    'max_gap_to_fill': 10,           # Don't interpolate gaps > 10 frames
-    'min_context_frames': 3,         # Need 3 YOLO frames on each side for spline
-    'velocity_window': 3,            # Frames to calculate velocity
-    'enable_smoothing': True,        # Apply Savitzky-Golay smoothing
-    'smoothing_window': 5,           # Window for smoothing
-    'smoothing_poly_order': 2,       # Polynomial order for smoothing
-    'validate_interpolation': True,  # Run quality checks
-    'force_method': None,            # Override auto-selection (for testing)
-    'log_corrections': True          # Log when physics is corrected
-}
+STATE_BOOTSTRAP = "BOOTSTRAP"
+STATE_TRACKING = "TRACKING"
+STATE_LOST = "LOST"
 
-# ---------------------------------------------------------
-# HELPERS & TRACKER
-# ---------------------------------------------------------
+@dataclass
+class BallState:
+    position: Tuple[float, float]
+    velocity: Tuple[float, float]
+    acceleration: Tuple[float, float]
+    has_bounced: bool
+    confidence: float
+    impact_frame: Optional[int] = None
+    impact_point: Optional[Tuple[float, float]] = None
+    would_hit_stumps: Optional[bool] = None
+    hit_frame: Optional[int] = None
+    hit_point: Optional[Tuple[float, float]] = None
+    bounce_point: Optional[Tuple[float, float]] = None
+    post_impact_path: Optional[List[Tuple[float, float]]] = None
 
-class BallMotionTracker:
-    def __init__(self, max_history=5):
-        self.positions = []  # [(center_x, center_y, frame_idx), ...]
-        self.max_history = max_history
-    
-    def reset(self):
-        self.positions = []
-    
-    def validate_detection(self, center, frame_idx):
-        """Check if detection follows consistent motion pattern."""
-        if len(self.positions) < 1:
-            self.positions.append((center[0], center[1], frame_idx))
-            return True
-        
-        # Calculate velocity
-        prev_x, prev_y, prev_frame = self.positions[-1]
-        dt = frame_idx - prev_frame
-        
-        # If pipeline doesn't pass frame_idx, dt is 0. 
-        if dt == 0:
-            return True 
-        
-        velocity_x = (center[0] - prev_x) / dt
-        velocity_y = (center[1] - prev_y) / dt
-        speed = np.sqrt(velocity_x**2 + velocity_y**2)
-        
-        # Relaxed velocity check
-        min_vel = DETECTION_CONFIG.get('min_velocity', 1)
-        # Note: We barely reject based on low speed anymore to be safe
-        
-        # Update history
-        self.positions.append((center[0], center[1], frame_idx))
-        if len(self.positions) > self.max_history:
-            self.positions.pop(0)
-        
-        return True
-
-_motion_tracker = BallMotionTracker()
+    def to_dict(self):
+        return {
+            "position": [float(self.position[0]), float(self.position[1])],
+            "velocity": [float(self.velocity[0]), float(self.velocity[1])],
+            "acceleration": [float(self.acceleration[0]), float(self.acceleration[1])],
+            "has_bounced": bool(self.has_bounced),
+            "confidence": float(self.confidence),
+            "impact_frame": self.impact_frame,
+            "impact_point": ([float(self.impact_point[0]), float(self.impact_point[1])] if self.impact_point else None),
+            "would_hit_stumps": self.would_hit_stumps,
+            "hit_frame": self.hit_frame,
+            "hit_point": ([float(self.hit_point[0]), float(self.hit_point[1])] if self.hit_point else None),
+            "bounce_point": ([float(self.bounce_point[0]), float(self.bounce_point[1])] if self.bounce_point else None),
+            "post_impact_path": (
+                [[float(p[0]), float(p[1])] for p in self.post_impact_path]
+                if self.post_impact_path else None
+            )
+        }
 
 class HybridBallTracker:
-    """
-    Hybrid tracker combining optical flow for blur/fast motion and physics for occlusion.
-    """
     def __init__(self):
-        self.last_center = None  # (x, y)
-        self.last_w = None
-        self.last_h = None
-        self.velocity = (0.0, 0.0)  # (vx, vy)
-        self.detection_history = []  # List of (x, y, frame_idx)
-        self.prev_frame = None  # Grayscale frame
-        self.tracking_mode = "yolo"  # "yolo", "optical_flow", "physics"
-        self.frames_since_yolo = 0
-        self.consecutive_failures = 0
-        self.max_physics_frames = DETECTION_CONFIG.get('physics_prediction_max_frames', 5)
-        self.velocity_window = DETECTION_CONFIG.get('velocity_window_size', 5)
-        self.gravity = DETECTION_CONFIG.get('gravity_constant', 0.5)
-        # Optical flow params
+        self.reset()
+        
+    def reset(self):
+        self.state = STATE_BOOTSTRAP
+        self.kf = None
+        self.kf_initialized = False
+        self.csrt = None
+        self.last_center = None
+        self.last_box = None
+        self.prev_frame_gray = None
+        self.prev_physics_pos = None
+        self.physics_violations = 0
+        self.consecutive_detections = 0
+        self.frames_without_update = 0
+        self.frames_without_measurement = 0
+        self.position_history = []
+        self.full_track_history = []
+        self.velocity_history = []
+        self.uncertainties = []
+        self.pre_bounce_history = []
+        self.post_bounce_history = []
+        self.bounce_detected = False
+        self.bounce_frame_idx = -1
+        self.stuck_counter = 0
+        self.confidence = 0.0
+        self.last_measurement_frame = -1
+        self.pitch_estimator = None
+        self.pitch_ready = False
+        self.pitch_y = None
+        self.pitch_model = None
+        self.bootstrap_history = []
+        self.batsman_box = None
+        self.wicket_line = None
+        self.impact_frame = None
+        self.impact_point = None
+        self.hit_frame = None
+        self.hit_point = None
+        self.would_hit_stumps = None
+        self.bounce_point = None
+        self.post_impact_path = None
+        self.last_fit_pred = None
+        self.ball_state = BallState((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), False, 0.0)
+
+        if BallKalmanFilter:
+            self.kf = BallKalmanFilter(fps=30)
+            self.ball_state = BallState((0.0, 0.0), (0.0, 0.0), (0.0, self.kf.gravity), False, 0.0)
+
+        if PitchPlaneEstimator:
+            self.pitch_estimator = PitchPlaneEstimator(
+                warmup_frames=DETECTION_CONFIG['pitch_warmup_frames'],
+                variance_threshold=DETECTION_CONFIG['pitch_variance_threshold'],
+                min_static_ratio=DETECTION_CONFIG['pitch_min_static_ratio'],
+                prefer_lower_half=DETECTION_CONFIG['pitch_prefer_lower_half'],
+                texture_threshold=DETECTION_CONFIG['pitch_texture_threshold'],
+                edge_low=DETECTION_CONFIG['pitch_edge_low'],
+                edge_high=DETECTION_CONFIG['pitch_edge_high']
+            )
+        
         self.lk_params = dict(winSize=(21, 21), maxLevel=3, 
                               criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
-    
-    def update_with_yolo(self, frame, ball_center, w, h, frame_idx):
-        """Update tracker with successful YOLO detection."""
-        self.last_center = ball_center
-        self.last_w = w
-        self.last_h = h
-        self.detection_history.append((ball_center[0], ball_center[1], frame_idx))
-        if len(self.detection_history) > self.velocity_window:
-            self.detection_history.pop(0)
-        self.calculate_velocity()
-        self.prev_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        self.tracking_mode = "yolo"
-        self.frames_since_yolo = 0
-        self.consecutive_failures = 0
-        logger.debug(f"[Hybrid] Updated with YOLO at {ball_center}, velocity {self.velocity}")
-    
-    def calculate_velocity(self):
-        """Calculate velocity using sliding window of detections."""
-        if len(self.detection_history) < 2:
-            self.velocity = (0.0, 0.0)
-            return
-        
-        # Use linear regression for velocity
-        points = np.array(self.detection_history)
-        t = points[:, 2]
-        x = points[:, 0]
-        y = points[:, 1]
-        
-        if len(t) > 1:
-            vx = np.polyfit(t, x, 1)[0]
-            vy = np.polyfit(t, y, 1)[0]
-            self.velocity = (vx, vy)
-    
-    def track_with_optical_flow(self, current_frame):
-        """Try optical flow tracking. Returns (predicted_center, quality_score) or (None, 0)."""
-        if self.last_center is None or self.prev_frame is None:
-            return None, 0.0
-        
-        current_gray = cv2.cvtColor(current_frame, cv2.COLOR_BGR2GRAY)
-        prev_points = np.array([self.last_center], dtype=np.float32).reshape(-1, 1, 2)
-        
-        next_points, status, error = cv2.calcOpticalFlowPyrLK(self.prev_frame, current_gray, prev_points, None, **self.lk_params)
-        
-        predicted_center = (int(next_points[0][0][0]), int(next_points[0][0][1]))
-        quality = self.is_optical_flow_reliable(status, predicted_center, error, current_frame.shape)
-        
-        if quality > DETECTION_CONFIG.get('optical_flow_quality_threshold', 0.7):
-            self.last_center = predicted_center
-            self.prev_frame = current_gray
-            self.tracking_mode = "optical_flow"
-            return predicted_center, quality
-        return None, quality
-    
-    def is_optical_flow_reliable(self, status, predicted_point, error, frame_shape):
-        """Assess optical flow quality. Returns score 0-1."""
-        if status[0] != 1:
-            return 0.0
-        
-        h, w = frame_shape[:2]
-        margin = 10
-        if not (margin <= predicted_point[0] <= w - margin and margin <= predicted_point[1] <= h - margin):
-            return 0.0
-        
-        # Movement magnitude check
-        dx = predicted_point[0] - self.last_center[0]
-        dy = predicted_point[1] - self.last_center[1]
-        movement = np.sqrt(dx**2 + dy**2)
-        expected_speed = np.sqrt(self.velocity[0]**2 + self.velocity[1]**2)
-        if expected_speed > 0 and not (0.5 * expected_speed <= movement <= 3.0 * expected_speed):
-            return 0.0
-        
-        # Error check
-        if error[0] > 5.0:
-            return 0.0
-        
-        # Jump check
-        expected_x = self.last_center[0] + self.velocity[0]
-        expected_y = self.last_center[1] + self.velocity[1]
-        jump = np.sqrt((predicted_point[0] - expected_x)**2 + (predicted_point[1] - expected_y)**2)
-        if jump > 50:
-            return 0.0
-        
-        return 1.0  # Perfect quality
-    
-    def predict_with_physics(self, frame_idx):
-        """Predict position using physics. Returns predicted_center or None."""
-        if self.last_center is None or len(self.detection_history) < 3:
-            return None
-        
-        last_frame = self.detection_history[-1][2]
-        t = frame_idx - last_frame
-        if t > self.max_physics_frames:
-            return None
-        
-        vx, vy = self.velocity
-        x = self.last_center[0] + vx * t
-        y = self.last_center[1] + vy * t + 0.5 * self.gravity * t**2
-        
-        predicted_center = (int(x), int(y))
-        self.tracking_mode = "physics"
-        logger.debug(f"[Hybrid] Physics prediction: t={t}, pos=({x:.1f}, {y:.1f})")
-        return predicted_center
-    
-    def reset(self):
-        """Reset tracker state."""
-        self.last_center = None
-        self.last_w = None
-        self.last_h = None
-        self.velocity = (0.0, 0.0)
-        self.detection_history = []
-        self.prev_frame = None
-        self.tracking_mode = "yolo"
-        self.frames_since_yolo = 0
-        self.consecutive_failures = 0
-        logger.debug("[Hybrid] Tracker reset")
 
-# Global hybrid tracker
+    def process_frame(self, frame, frame_idx, yolo_detector, batsman_box=None, wicket_line=None):
+        self.batsman_box = batsman_box
+        self.wicket_line = wicket_line
+        processed_frame = frame
+        if preprocess_frame:
+            processed_frame, _ = preprocess_frame(frame)
+        frame_gray = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2GRAY)
+        self._ensure_kf_initialized(processed_frame)
+        kf_pred_pos = None
+        kf_velocity = (0.0, 0.0)
+        if self.kf:
+            px, py = self.kf.predict()
+            kf_pred_pos = (px, py)
+            full_state = self.kf.get_full_state()
+            kf_velocity = (full_state[2], full_state[3])
+        self._update_pitch_plane(frame)
+        ball_info = None
+        
+        if self.state == STATE_BOOTSTRAP:
+            candidates = self._run_yolo_detection(processed_frame, yolo_detector, frame_idx)
+            # Filter for higher confidence during bootstrap
+            valid_candidates = [c for c in candidates if c['conf'] >= DETECTION_CONFIG['bootstrap_conf_threshold']]
+            state_source = "physics"
+            candidate_conf = 0.0
+            
+            if valid_candidates:
+                cand = max(valid_candidates, key=lambda c: c['conf'])
+                box = cand['box']
+                cx, cy = box[0] + box[2] // 2, box[1] + box[3] // 2
+                area = cand['area']
+                
+                # Check for motion if we have a previous point
+                motion_valid = True
+                if self.last_center:
+                    dist = math.hypot(cx - self.last_center[0], cy - self.last_center[1])
+                    if dist < DETECTION_CONFIG['min_bootstrap_motion']:
+                        # Stationary object detected - reset bootstrap
+                        self.consecutive_detections = 0
+                        motion_valid = False
+                
+                if motion_valid:
+                    self.last_center = (cx, cy)
+                    self.last_box = box
+                    self.consecutive_detections += 1
+                    self.bootstrap_history.append({
+                        'frame_idx': frame_idx,
+                        'center': (cx, cy),
+                        'area': area,
+                        'conf': cand['conf']
+                    })
+                    self.bootstrap_history = [
+                        h for h in self.bootstrap_history
+                        if frame_idx - h['frame_idx'] <= DETECTION_CONFIG['bootstrap_frames'] + 2
+                    ]
+                    if self.kf:
+                        if not self.kf_initialized:
+                            self.kf.initialize(cx, cy)
+                            self.kf_initialized = True
+                        else:
+                            self.kf.update(cx, cy)
+
+                    bootstrap_ready = self._bootstrap_motion_consistent()
+                    if self.consecutive_detections >= DETECTION_CONFIG['bootstrap_frames'] or bootstrap_ready:
+                        self._initialize_tracking(frame, box)
+                        self.state = STATE_TRACKING
+                        self.confidence = 1.0
+                    state_source = "yolo"
+                    candidate_conf = cand['conf']
+            else:
+                self.consecutive_detections = 0
+                self.last_center = None # Clear history on loss during bootstrap
+                self.bootstrap_history = []
+                self._update_confidence(0.0, used_measurement=False)
+
+            if state_source == "yolo":
+                self._update_confidence(candidate_conf, used_measurement=True)
+
+            self._enforce_physics_constraints()
+            self._refresh_ball_state()
+            ball_info = self._build_ball_info(state_source)
+            self.prev_frame_gray = frame_gray
+            return ball_info
+
+        elif self.state == STATE_TRACKING:
+            if kf_pred_pos:
+                kf_pred_pos = self._apply_pitch_constraints(kf_pred_pos[0], kf_pred_pos[1], frame_idx)
+            if self.kf:
+                self.velocity_history.append(kf_velocity[1])
+
+            fit_pred = self._get_fit_prediction(frame_idx)
+            self.last_fit_pred = fit_pred
+            of_success, of_pos, of_qual = self._track_optical_flow(frame_gray)
+            candidates = self._run_yolo_detection(processed_frame, yolo_detector, frame_idx)
+            
+            best_candidate = None
+            if kf_pred_pos:
+                gating_radius = DETECTION_CONFIG['max_drift_pixels'] + 0.5 * math.hypot(*kf_velocity)
+                best_score = float('inf')
+                for cand in candidates:
+                    dist = math.hypot(cand['center'][0] - kf_pred_pos[0], cand['center'][1] - kf_pred_pos[1])
+                    if dist <= gating_radius:
+                        last_area = self.last_box[2] * self.last_box[3] if self.last_box else cand['area']
+                        size_score = abs(cand['area'] - last_area) / last_area
+                        score = dist * 0.6 + size_score * 20.0
+                        if score < best_score:
+                            best_score = score
+                            best_candidate = cand
+
+            candidate_pos = None
+            source = "physics"
+            candidate_conf = 0.0
+            if best_candidate:
+                bx, by, bw, bh = best_candidate['box']
+                last_area = self.last_box[2] * self.last_box[3] if self.last_box else (bw * bh)
+                ratio = (bw * bh) / last_area
+                if 0.5 <= ratio <= 2.2:
+                    candidate_pos = (int(bx + bw / 2), int(by + bh / 2))
+                    source = "yolo"
+                    candidate_conf = best_candidate['conf']
+                    self.last_box = best_candidate['box']
+                    if not self._is_candidate_consistent(candidate_pos, candidate_conf, fit_pred):
+                        candidate_pos = None
+                        source = "unknown"
+
+            if not candidate_pos and of_success and of_qual > DETECTION_CONFIG['optical_flow_quality_threshold']:
+                candidate_pos = of_pos
+                source = "optical_flow"
+                candidate_conf = 0.6
+                if not self._is_candidate_consistent(candidate_pos, candidate_conf, fit_pred):
+                    candidate_pos = None
+                    source = "unknown"
+            
+            if not candidate_pos and self.csrt:
+                success, box = self.csrt.update(frame)
+                if success:
+                    candidate_pos = (int(box[0] + box[2] / 2), int(box[1] + box[3] / 2))
+                    self.last_box = [int(v) for v in box]
+                    source = "csrt"
+                    candidate_conf = 0.55
+                    if not self._is_candidate_consistent(candidate_pos, candidate_conf, fit_pred):
+                        candidate_pos = None
+                        source = "unknown"
+
+            if not candidate_pos and fit_pred and self.frames_without_update <= DETECTION_CONFIG['max_fit_gap']:
+                candidate_pos = fit_pred
+                source = "guided_recovery"
+                candidate_conf = 0.35
+
+            if not candidate_pos and kf_pred_pos:
+                if self.kf:
+                    self.kf.relax_constraints()
+                candidate_pos = kf_pred_pos
+                source = "physics"
+                candidate_conf = 0.25
+
+            if candidate_pos and source in ["yolo", "optical_flow", "csrt"]:
+                if not self._is_measurement_acceptable(candidate_pos, source, kf_pred_pos):
+                    candidate_pos = None
+                    source = "physics"
+                elif fit_pred is not None:
+                    fit_residual = math.hypot(candidate_pos[0] - fit_pred[0], candidate_pos[1] - fit_pred[1])
+                    if fit_residual > DETECTION_CONFIG['fit_residual_threshold']:
+                        candidate_pos = fit_pred
+                        source = "guided_recovery"
+                        candidate_conf = 0.3
+
+            if candidate_pos:
+                self.last_center = candidate_pos
+                self.full_track_history.append(candidate_pos)
+                if self.kf:
+                    should_update = source in ["yolo", "optical_flow", "csrt", "guided_recovery"]
+                    if should_update:
+                        noise_scale = self._measurement_noise_scale(source)
+                        if noise_scale is not None:
+                            self.kf.set_measurement_noise_scale(noise_scale)
+                        self.kf.update(candidate_pos[0], candidate_pos[1])
+                        if noise_scale is not None:
+                            self.kf.set_measurement_noise_scale(1.0)
+                    full_state = self.kf.get_full_state()
+                    kf_velocity = (full_state[2], full_state[3])
+                    cov = self.kf.kf.errorCovPost[:2, :2]
+                    self.uncertainties.append(float(np.trace(cov)))
+                else:
+                    self.uncertainties.append(10.0)
+                
+                used_measurement = source in ["yolo", "optical_flow", "csrt"]
+                self._update_confidence(candidate_conf, used_measurement)
+                if used_measurement:
+                    self.frames_without_measurement = 0
+                else:
+                    self.frames_without_measurement += 1
+
+                self._check_impact(frame_idx, candidate_pos, used_measurement)
+                self._check_post_impact_prediction()
+
+                self._enforce_physics_constraints()
+                self._refresh_ball_state()
+                if source in ["yolo", "optical_flow", "csrt", "guided_recovery"]:
+                    self._update_fit_history(frame_idx, candidate_pos)
+                ball_info = self._build_ball_info(source)
+                if used_measurement:
+                    self.frames_without_update = 0
+                else:
+                    self.frames_without_update += 1
+            else:
+                self.frames_without_update += 1
+                self._update_confidence(0.0, used_measurement=False)
+                self.frames_without_measurement += 1
+                if self.frames_without_update > DETECTION_CONFIG['max_coast_frames']:
+                    self.state = STATE_LOST
+
+                self._check_impact(frame_idx, self.last_center, used_measurement=False)
+                self._check_post_impact_prediction()
+                self._enforce_physics_constraints()
+                self._refresh_ball_state()
+                ball_info = self._build_ball_info("physics")
+
+            if (self.confidence < DETECTION_CONFIG['min_confidence']
+                or self.frames_without_measurement > DETECTION_CONFIG['physics_prediction_horizon']):
+                self.state = STATE_LOST
+                self.reset()
+                return None
+            
+            self.prev_frame_gray = frame_gray
+            return ball_info
+            
+        elif self.state == STATE_LOST:
+            self.reset()
+            return None
+
+    def _ensure_kf_initialized(self, frame):
+        if not self.kf or self.kf_initialized:
+            return
+        h, w = frame.shape[:2]
+        cx, cy = float(w * 0.5), float(h * 0.5)
+        self.kf.initialize(cx, cy)
+        self.kf_initialized = True
+
+    def _enforce_physics_constraints(self):
+        if not self.kf or not self.kf_initialized:
+            return
+        full_state = self.kf.get_full_state()
+        vx, vy, ay = full_state[2], full_state[3], full_state[5]
+        violations = 0
+
+        if vx < 0.0:
+            vx = 0.0
+            violations += 1
+
+        if not self.bounce_detected and vy < 0.0:
+            vy = 0.0
+            violations += 1
+
+        if abs(ay - float(self.kf.gravity)) > 1e-3:
+            ay = float(self.kf.gravity)
+            violations += 1
+
+        if violations:
+            self.physics_violations += violations
+        elif self.physics_violations > 0:
+            self.physics_violations -= 1
+
+        if self.physics_violations >= DETECTION_CONFIG['max_physics_violations']:
+            self.state = STATE_LOST
+            self.confidence = 0.0
+
+        self.kf.set_state(vx=vx, vy=vy, ay=ay)
+
+    def _refresh_ball_state(self):
+        if self.kf:
+            full_state = self.kf.get_full_state()
+            position = (full_state[0], full_state[1])
+            velocity = (full_state[2], full_state[3])
+            acceleration = (0.0, float(self.kf.gravity))
+        else:
+            position = self.last_center if self.last_center else (0.0, 0.0)
+            velocity = (0.0, 0.0)
+            acceleration = (0.0, 0.0)
+        self.ball_state = BallState(
+            position=position,
+            velocity=velocity,
+            acceleration=acceleration,
+            has_bounced=self.bounce_detected,
+            confidence=self.confidence,
+            impact_frame=self.impact_frame,
+            impact_point=self.impact_point,
+            would_hit_stumps=self.would_hit_stumps,
+            hit_frame=self.hit_frame,
+            hit_point=self.hit_point,
+            bounce_point=self.bounce_point,
+            post_impact_path=self.post_impact_path
+        )
+        self.prev_physics_pos = self.ball_state.position
+
+    def _check_impact(self, frame_idx, pos, used_measurement):
+        if self.impact_frame is not None or not self.batsman_box:
+            return
+        if pos is None:
+            return
+        if self._point_in_box(pos, self.batsman_box, DETECTION_CONFIG['impact_roi_margin']):
+            impact_pos = self.last_fit_pred if self.last_fit_pred is not None else pos
+            self.impact_frame = int(frame_idx)
+            self.impact_point = (float(impact_pos[0]), float(impact_pos[1]))
+            return
+        if (not used_measurement and
+            self.frames_without_measurement >= DETECTION_CONFIG['impact_no_measurement_frames'] and
+            self.last_center is not None and
+            self._point_in_box(self.last_center, self.batsman_box, DETECTION_CONFIG['impact_roi_margin'])):
+            impact_pos = self.last_fit_pred if self.last_fit_pred is not None else self.last_center
+            self.impact_frame = int(frame_idx)
+            self.impact_point = (float(impact_pos[0]), float(impact_pos[1]))
+
+    def _check_post_impact_prediction(self):
+        if self.impact_frame is None or self.would_hit_stumps is not None:
+            return
+        if not self.wicket_line or not self.kf:
+            return
+        full_state = self.kf.get_full_state()
+        pos = (float(full_state[0]), float(full_state[1]))
+        vx, vy = float(full_state[2]), float(full_state[3])
+        ay = float(self.kf.gravity)
+
+        x_line = float(self.wicket_line.get("x", 0.0))
+        y_top = float(self.wicket_line.get("y_top", 0.0))
+        y_bottom = float(self.wicket_line.get("y_bottom", 0.0))
+        if y_bottom < y_top:
+            y_top, y_bottom = y_bottom, y_top
+
+        prev = pos
+        path = [pos]
+        for i in range(1, DETECTION_CONFIG['post_impact_predict_frames'] + 1):
+            t = float(i)
+            x = pos[0] + vx * t
+            y = pos[1] + vy * t + 0.5 * ay * t * t
+            path.append((x, y))
+            if (prev[0] - x_line) * (x - x_line) <= 0:
+                y_at_line = prev[1] + (y - prev[1]) * ((x_line - prev[0]) / (x - prev[0] + 1e-6))
+                if y_at_line >= y_top and y_at_line <= y_bottom:
+                    self.would_hit_stumps = True
+                    self.hit_frame = int(self.impact_frame + i)
+                    self.hit_point = (float(x_line), float(y_at_line))
+                    self.post_impact_path = path
+                    return
+            prev = (x, y)
+        self.would_hit_stumps = False
+        self.post_impact_path = path
+
+    def _point_in_box(self, pos, box, margin):
+        x, y = float(pos[0]), float(pos[1])
+        bx, by, bw, bh = [float(v) for v in box]
+        return (x >= bx - margin and x <= bx + bw + margin and
+                y >= by - margin and y <= by + bh + margin)
+
+    def _update_fit_history(self, frame_idx, pos):
+        if self.bounce_detected:
+            self.post_bounce_history.append((int(frame_idx), float(pos[0]), float(pos[1])))
+            if len(self.post_bounce_history) > DETECTION_CONFIG['fit_window'] * 2:
+                self.post_bounce_history = self.post_bounce_history[-DETECTION_CONFIG['fit_window'] * 2:]
+        else:
+            self.pre_bounce_history.append((int(frame_idx), float(pos[0]), float(pos[1])))
+            if len(self.pre_bounce_history) > DETECTION_CONFIG['fit_window'] * 2:
+                self.pre_bounce_history = self.pre_bounce_history[-DETECTION_CONFIG['fit_window'] * 2:]
+
+    def _fit_segment(self, history):
+        if len(history) < 5:
+            return None
+        frames = np.array([h[0] for h in history], dtype=np.float32)
+        xs = np.array([h[1] for h in history], dtype=np.float32)
+        ys = np.array([h[2] for h in history], dtype=np.float32)
+        f0 = frames[0]
+        t = (frames - f0).reshape(-1, 1)
+        try:
+            coef_x = np.polyfit(t[:, 0], xs, 1)
+            coef_y = np.polyfit(t[:, 0], ys, 2)
+        except Exception:
+            return None
+        return coef_x, coef_y, f0
+
+    def _get_fit_prediction(self, frame_idx):
+        history = self.post_bounce_history if self.bounce_detected else self.pre_bounce_history
+        fit = self._fit_segment(history)
+        if not fit:
+            return None
+        coef_x, coef_y, f0 = fit
+        t = float(frame_idx - f0)
+        pred_x = coef_x[0] * t + coef_x[1]
+        pred_y = coef_y[0] * t * t + coef_y[1] * t + coef_y[2]
+        return (float(pred_x), float(pred_y))
+
+    def _estimate_bounce_frame_idx(self, frame_idx):
+        history = self.pre_bounce_history
+        fit = self._fit_segment(history)
+        if not fit or self.pitch_y is None:
+            return frame_idx
+        coef_x, coef_y, f0 = fit
+        a, b, c = coef_y[0], coef_y[1], coef_y[2] - float(self.pitch_y)
+        if abs(a) < 1e-6:
+            if abs(b) < 1e-6:
+                return frame_idx
+            t = -c / b
+            return int(round(f0 + max(0.0, t)))
+        disc = b * b - 4.0 * a * c
+        if disc < 0:
+            return frame_idx
+        sqrt_disc = math.sqrt(disc)
+        t1 = (-b + sqrt_disc) / (2.0 * a)
+        t2 = (-b - sqrt_disc) / (2.0 * a)
+        candidates = [t for t in [t1, t2] if t >= 0.0]
+        if not candidates:
+            return frame_idx
+        t = min(candidates, key=lambda v: abs((f0 + v) - frame_idx))
+        return int(round(f0 + t))
+
+    def _measurement_noise_scale(self, source):
+        if source == "yolo":
+            return DETECTION_CONFIG['yolo_noise_scale']
+        if source == "optical_flow":
+            return DETECTION_CONFIG['optical_noise_scale']
+        if source == "csrt":
+            return DETECTION_CONFIG['csrt_noise_scale']
+        if source == "guided_recovery":
+            return DETECTION_CONFIG['guided_noise_scale']
+        return None
+
+    def _is_measurement_acceptable(self, pos, source, kf_pred_pos):
+        if self.pitch_y is not None and pos[1] > self.pitch_y + DETECTION_CONFIG['pitch_margin']:
+            return False
+
+        if self.last_center:
+            vx = pos[0] - self.last_center[0]
+            vy = pos[1] - self.last_center[1]
+            if abs(vx) > DETECTION_CONFIG['max_velocity'] or abs(vy) > DETECTION_CONFIG['max_velocity']:
+                return False
+            if not self.bounce_detected and vy < -DETECTION_CONFIG['min_upward_velocity']:
+                return False
+            if vx < -1.0:
+                return False
+
+        if kf_pred_pos:
+            dist = math.hypot(pos[0] - kf_pred_pos[0], pos[1] - kf_pred_pos[1])
+            if source == "yolo":
+                gate = DETECTION_CONFIG['yolo_gate_px']
+            elif source == "optical_flow":
+                gate = DETECTION_CONFIG['optical_gate_px']
+            else:
+                gate = DETECTION_CONFIG['csrt_gate_px']
+            if dist > gate:
+                return False
+
+        return True
+
+    def _build_ball_info(self, source):
+        box = None
+        if self.last_box:
+            w, h = self.last_box[2], self.last_box[3]
+            box = [
+                int(self.ball_state.position[0] - w / 2),
+                int(self.ball_state.position[1] - h / 2),
+                int(w),
+                int(h)
+            ]
+        return {
+            "box": box,
+            "conf": float(self.confidence),
+            "source": source,
+            "velocity": self.ball_state.velocity,
+            "bounce": self.bounce_detected and (self.bounce_frame_idx >= 0),
+            "state": self.ball_state.to_dict(),
+            "trajectory": [
+                [float(p[0]), float(p[1])]
+                for p in self.full_track_history[-DETECTION_CONFIG['fit_window'] * 2:]
+            ]
+        }
+
+    def _update_pitch_plane(self, frame):
+        if not self.pitch_estimator or self.pitch_ready:
+            return
+        pitch_y = self.pitch_estimator.add_frame(frame)
+        if pitch_y is not None:
+            self.pitch_y = pitch_y
+            self.pitch_model = self.pitch_estimator.get_model()
+            self.pitch_ready = True
+
+    def _apply_pitch_constraints(self, px, py, frame_idx):
+        if not self.kf or self.pitch_y is None:
+            return (px, py)
+        pitch_y = self.pitch_y
+        if self.pitch_estimator:
+            pitch_at_x = self.pitch_estimator.get_pitch_y_at_x(px)
+            if pitch_at_x is not None:
+                pitch_y = pitch_at_x
+        full_state = self.kf.get_full_state()
+        vx, vy = full_state[2], full_state[3]
+
+        if self.impact_frame is not None:
+            if py >= pitch_y:
+                clamped_y = pitch_y - DETECTION_CONFIG['pitch_margin']
+                self.kf.set_state(y=clamped_y, vy=min(vy, 0.0))
+                return (px, clamped_y)
+            return (px, py)
+
+        crossed = False
+        if self.prev_physics_pos is not None:
+            crossed = self.prev_physics_pos[1] < pitch_y and py >= pitch_y
+
+        if not self.bounce_detected and crossed:
+            self.bounce_detected = True
+            self.bounce_frame_idx = self._estimate_bounce_frame_idx(frame_idx)
+            self.post_bounce_history = []
+            self.bounce_point = (float(px), float(pitch_y))
+            new_vy = -abs(vy) * DETECTION_CONFIG['bounce_damping']
+            self.kf.set_state(y=pitch_y, vy=new_vy)
+            self.kf.reset_constraints()
+            return (px, pitch_y)
+
+        if py >= pitch_y:
+            clamped_y = pitch_y - DETECTION_CONFIG['pitch_margin']
+            self.kf.set_state(y=clamped_y, vy=min(vy, 0.0))
+            return (px, clamped_y)
+
+        return (px, py)
+
+    def _is_candidate_consistent(self, pos, conf, fit_pred):
+        if self.pitch_y is not None and not self.bounce_detected:
+            if pos[1] > self.pitch_y + DETECTION_CONFIG['pitch_margin']:
+                return False
+        if fit_pred:
+            dist = math.hypot(pos[0] - fit_pred[0], pos[1] - fit_pred[1])
+            if dist > DETECTION_CONFIG['fit_residual_threshold'] and conf < DETECTION_CONFIG['high_confidence']:
+                return False
+            if dist > DETECTION_CONFIG['fit_residual_threshold'] * 1.5:
+                return False
+        return True
+
+    def _update_confidence(self, meas_conf, used_measurement):
+        if used_measurement:
+            blended = 0.7 * self.confidence + 0.3 * max(0.5, meas_conf)
+            self.confidence = min(1.0, blended)
+        else:
+            self.confidence = max(0.0, self.confidence - DETECTION_CONFIG['confidence_decay'])
+
+    def _bootstrap_motion_consistent(self):
+        if len(self.bootstrap_history) < 3:
+            return False
+        history = sorted(self.bootstrap_history, key=lambda h: h['frame_idx'])
+        vectors = []
+        for i in range(1, len(history)):
+            p0 = history[i - 1]['center']
+            p1 = history[i]['center']
+            dx, dy = (p1[0] - p0[0], p1[1] - p0[1])
+            if math.hypot(dx, dy) >= DETECTION_CONFIG['min_bootstrap_motion']:
+                vectors.append((dx, dy))
+        if len(vectors) < 2:
+            return False
+        angles = [math.atan2(v[1], v[0]) for v in vectors]
+        angle_spread = max(angles) - min(angles)
+        if angle_spread > math.radians(45):
+            return False
+        areas = [h['area'] for h in history[-3:]]
+        if min(areas) <= 0:
+            return False
+        ratio = max(areas) / min(areas)
+        return ratio <= 2.0
+
+    def _initialize_tracking(self, frame, box):
+        try:
+            if not self.csrt:
+                self.csrt = cv2.TrackerCSRT_create()
+            H, W = frame.shape[:2]
+            bx, by, bw, bh = box
+            bx = max(0, min(W-1, int(bx)))
+            by = max(0, min(H-1, int(by)))
+            bw = max(1, min(W-bx, int(bw)))
+            bh = max(1, min(H-by, int(bh)))
+            self.csrt.init(frame, (bx, by, bw, bh))
+        except Exception:
+            self.csrt = None
+
+    def _run_yolo_detection(self, frame, detector, frame_idx):
+        if frame is None or frame.size == 0 or detector is None: return []
+        try:
+            detections = detector.detect(frame, conf=0.2, iou=0.45)
+            candidates = []
+            for det in detections:
+                x, y, w, h, conf = det[:5]
+                area = w * h
+                if DETECTION_CONFIG['min_area'] <= area <= DETECTION_CONFIG['max_area']:
+                    candidates.append({
+                        'box': [int(x), int(y), int(w), int(h)],
+                        'conf': float(conf),
+                        'area': area,
+                        'center': (x + w / 2.0, y + h / 2.0)
+                    })
+            return candidates
+        except Exception:
+            return []
+
+    def _track_optical_flow(self, current_gray):
+        if self.last_center is None or self.prev_frame_gray is None: return False, None, 0.0
+        try:
+            p0 = np.array([[self.last_center]], dtype=np.float32)
+            p1, st, err = cv2.calcOpticalFlowPyrLK(self.prev_frame_gray, current_gray, p0, None, **self.lk_params)
+            if st[0] == 1:
+                new_pos = (float(p1[0][0][0]), float(p1[0][0][1]))
+                if math.hypot(new_pos[0]-self.last_center[0], new_pos[1]-self.last_center[1]) < 120:
+                    return True, new_pos, 1.0
+        except Exception:
+            pass
+        return False, None, 0.0
+
 _hybrid_tracker = None
+_yolo_detector = None
 
 def get_hybrid_tracker():
     global _hybrid_tracker
-    if _hybrid_tracker is None:
-        _hybrid_tracker = HybridBallTracker()
+    if _hybrid_tracker is None: _hybrid_tracker = HybridBallTracker()
     return _hybrid_tracker
-
-class TrajectoryPostProcessor:
-    """
-    Post-processes ball trajectory to fill gaps using backwards interpolation.
-    """
-    def __init__(self, config=None):
-        self.config = config or POSTPROCESS_CONFIG.copy()
-    
-    def detect_gaps(self, frame_results):
-        """Identify gaps in detection where interpolation is needed."""
-        gaps = []
-        in_gap = False
-        gap_start = None
-        gap_frames = []
-        
-        for i, result in enumerate(frame_results):
-            if result['source'] == 'yolo':
-                if in_gap and gap_start is not None:
-                    # End of gap
-                    gap_end = i - 1
-                    start_pos = frame_results[gap_start]['position']
-                    end_pos = result['position']
-                    gaps.append({
-                        'start_frame': gap_start,
-                        'end_frame': gap_end,
-                        'gap_frames': gap_frames,
-                        'start_pos': start_pos,
-                        'end_pos': end_pos
-                    })
-                    in_gap = False
-                    gap_start = None
-                    gap_frames = []
-            else:
-                if not in_gap:
-                    in_gap = True
-                    gap_start = i
-                gap_frames.append(i)
-        
-        return gaps
-    
-    def calculate_velocity_at_boundary(self, frame_results, boundary_frame, window=3):
-        """Calculate velocity vector at gap boundary."""
-        if boundary_frame - window < 0 or boundary_frame + window >= len(frame_results):
-            return (0.0, 0.0)
-        
-        # For start boundary: use frames before
-        points = []
-        for i in range(boundary_frame - window, boundary_frame + 1):
-            if frame_results[i]['position'] is not None:
-                points.append((frame_results[i]['position'][0], frame_results[i]['position'][1], i))
-        
-        if len(points) < 2:
-            return (0.0, 0.0)
-        
-        points = np.array(points)
-        t = points[:, 2]
-        x = points[:, 0]
-        y = points[:, 1]
-        
-        vx = np.polyfit(t, x, 1)[0]
-        vy = np.polyfit(t, y, 1)[0]
-        return (vx, vy)
-    
-    def linear_interpolate(self, start_pos, end_pos, num_frames):
-        """Simple linear interpolation."""
-        positions = []
-        for i in range(num_frames):
-            alpha = (i + 1) / (num_frames + 1)
-            x = start_pos[0] + alpha * (end_pos[0] - start_pos[0])
-            y = start_pos[1] + alpha * (end_pos[1] - start_pos[1])
-            positions.append((x, y))
-        return positions
-    
-    def parabolic_interpolate(self, start_pos, end_pos, start_velocity, end_velocity, num_frames):
-        """Fit parabolic curve considering velocities."""
-        # Simplified: use quadratic Bezier
-        control_x = (start_pos[0] + end_pos[0]) / 2 + (end_velocity[0] - start_velocity[0]) * num_frames / 4
-        control_y = (start_pos[1] + end_pos[1]) / 2 + (end_velocity[1] - start_velocity[1]) * num_frames / 4
-        
-        positions = []
-        for i in range(num_frames):
-            t = (i + 1) / (num_frames + 1)
-            x = (1 - t)**2 * start_pos[0] + 2 * (1 - t) * t * control_x + t**2 * end_pos[0]
-            y = (1 - t)**2 * start_pos[1] + 2 * (1 - t) * t * control_y + t**2 * end_pos[1]
-            positions.append((x, y))
-        return positions
-    
-    def spline_interpolate(self, context_positions, gap_frames):
-        """Use cubic spline for smooth curves."""
-        if len(context_positions) < 4:
-            return []
-        
-        frames = [p[2] for p in context_positions]
-        xs = [p[0] for p in context_positions]
-        ys = [p[1] for p in context_positions]
-        
-        cs_x = scipy.interpolate.CubicSpline(frames, xs)
-        cs_y = scipy.interpolate.CubicSpline(frames, ys)
-        
-        positions = []
-        for frame in gap_frames:
-            x = cs_x(frame)
-            y = cs_y(frame)
-            positions.append((x, y))
-        return positions
-    
-    def select_interpolation_method(self, gap_info, frame_results):
-        """Choose interpolation method based on gap characteristics."""
-        gap_length = len(gap_info['gap_frames'])
-        
-        if self.config.get('force_method'):
-            return self.config['force_method']
-        
-        # Gap length
-        if gap_length <= 3:
-            return 'linear'
-        elif gap_length <= 6:
-            return 'parabolic'
-        else:
-            # Check context
-            start_idx = gap_info['start_frame']
-            end_idx = gap_info['end_frame']
-            context_before = [r for r in frame_results[max(0, start_idx-5):start_idx] if r['source'] == 'yolo']
-            context_after = [r for r in frame_results[end_idx+1:min(len(frame_results), end_idx+6)] if r['source'] == 'yolo']
-            if len(context_before) >= self.config['min_context_frames'] and len(context_after) >= self.config['min_context_frames']:
-                return 'spline'
-            else:
-                return 'parabolic'
-    
-    def interpolate_gap(self, gap_info, frame_results):
-        """Fill gap with interpolated positions."""
-        method = self.select_interpolation_method(gap_info, frame_results)
-        num_frames = len(gap_info['gap_frames'])
-        
-        if method == 'linear':
-            positions = self.linear_interpolate(gap_info['start_pos'], gap_info['end_pos'], num_frames)
-        elif method == 'parabolic':
-            start_vel = self.calculate_velocity_at_boundary(frame_results, gap_info['start_frame'], self.config['velocity_window'])
-            end_vel = self.calculate_velocity_at_boundary(frame_results, gap_info['end_frame'], self.config['velocity_window'])
-            positions = self.parabolic_interpolate(gap_info['start_pos'], gap_info['end_pos'], start_vel, end_vel, num_frames)
-        elif method == 'spline':
-            # Collect context
-            start_idx = gap_info['start_frame']
-            end_idx = gap_info['end_frame']
-            context = []
-            for i in range(max(0, start_idx-5), min(len(frame_results), end_idx+6)):
-                if frame_results[i]['position'] is not None:
-                    context.append((frame_results[i]['position'][0], frame_results[i]['position'][1], i))
-            positions = self.spline_interpolate(context, gap_info['gap_frames'])
-        else:
-            positions = []
-        
-        return positions, method
-    
-    def validate_interpolation(self, gap_info, interpolated_positions):
-        """Check if interpolation is reasonable."""
-        if not interpolated_positions:
-            return False, 0.0, ["No positions generated"]
-        
-        warnings = []
-        quality_score = 1.0
-        
-        # Bounds check
-        for pos in interpolated_positions:
-            if pos[0] < 0 or pos[1] < 0 or pos[0] > 1920 or pos[1] > 1080:  # Assume 1080p
-                warnings.append("Position out of bounds")
-                quality_score -= 0.5
-        
-        # Velocity check
-        for i in range(1, len(interpolated_positions)):
-            dx = interpolated_positions[i][0] - interpolated_positions[i-1][0]
-            dy = interpolated_positions[i][1] - interpolated_positions[i-1][1]
-            speed = np.sqrt(dx**2 + dy**2)
-            if speed > 200:
-                warnings.append(f"Excessive speed: {speed}")
-                quality_score -= 0.3
-        
-        is_valid = quality_score > 0.5
-        return is_valid, quality_score, warnings
-    
-    def process_trajectory(self, frame_results):
-        """Main entry point for post-processing."""
-        gaps = self.detect_gaps(frame_results)
-        corrected_results = frame_results.copy()
-        
-        for gap_idx, gap in enumerate(gaps):
-            if len(gap['gap_frames']) > self.config['max_gap_to_fill']:
-                continue
-            
-            interpolated_positions, method = self.interpolate_gap(gap, frame_results)
-            
-            if self.config['validate_interpolation']:
-                is_valid, quality, warnings = self.validate_interpolation(gap, interpolated_positions)
-                if not is_valid:
-                    logger.warning(f"Gap {gap_idx}: Invalid interpolation - {warnings}")
-                    continue
-            
-            for i, frame_idx in enumerate(gap['gap_frames']):
-                if i < len(interpolated_positions):
-                    original = corrected_results[frame_idx]
-                    corrected_results[frame_idx] = {
-                        'frame_idx': frame_idx,
-                        'position': interpolated_positions[i],
-                        'conf': -3.0,
-                        'source': f'interpolated_{method}',
-                        'original_source': original['source'],
-                        'original_position': original['position'],
-                        'gap_id': gap_idx
-                    }
-                    if self.config['log_corrections']:
-                        print(f"[PostProcess] Frame {frame_idx}: Corrected {original['source']} to interpolated_{method}")
-        
-        if self.config['enable_smoothing']:
-            corrected_results = self.apply_smoothing(corrected_results)
-        
-        return corrected_results
-    
-    def apply_smoothing(self, frame_results):
-        """Apply Savitzky-Golay smoothing."""
-        positions = []
-        frames = []
-        for r in frame_results:
-            if r['position'] is not None:
-                positions.append(r['position'])
-                frames.append(r['frame_idx'])
-        
-        if len(positions) < self.config['smoothing_window']:
-            return frame_results
-        
-        xs = [p[0] for p in positions]
-        ys = [p[1] for p in positions]
-        
-        from scipy.signal import savgol_filter
-        smoothed_xs = savgol_filter(xs, self.config['smoothing_window'], self.config['smoothing_poly_order'])
-        smoothed_ys = savgol_filter(ys, self.config['smoothing_window'], self.config['smoothing_poly_order'])
-        
-        smoothed_results = frame_results.copy()
-        pos_idx = 0
-        for i, r in enumerate(smoothed_results):
-            if r['position'] is not None:
-                smoothed_results[i]['position'] = (smoothed_xs[pos_idx], smoothed_ys[pos_idx])
-                pos_idx += 1
-        
-        return smoothed_results
-    
-    def visualize_corrections(self, original_results, corrected_results, output_path):
-        """Create visualization of corrections."""
-        try:
-            import matplotlib.pyplot as plt
-            
-            orig_x = [r['position'][0] for r in original_results if r['position'] is not None and r['source'] == 'yolo']
-            orig_y = [r['position'][1] for r in original_results if r['position'] is not None and r['source'] == 'yolo']
-            
-            phys_x = [r['position'][0] for r in original_results if r['position'] is not None and r['source'] == 'physics']
-            phys_y = [r['position'][1] for r in original_results if r['position'] is not None and r['source'] == 'physics']
-            
-            interp_x = [r['position'][0] for r in corrected_results if r['position'] is not None and 'interpolated' in r['source']]
-            interp_y = [r['position'][1] for r in corrected_results if r['position'] is not None and 'interpolated' in r['source']]
-            
-            plt.figure(figsize=(10, 6))
-            plt.scatter(orig_x, orig_y, c='blue', label='YOLO detections', s=50)
-            plt.scatter(phys_x, phys_y, c='red', label='Physics predictions', s=30, alpha=0.7)
-            plt.plot(interp_x, interp_y, c='green', label='Interpolated trajectory', linewidth=2)
-            plt.xlabel('X position')
-            plt.ylabel('Y position')
-            plt.title('Trajectory Correction Visualization')
-            plt.legend()
-            plt.gca().invert_yaxis()  # Video coordinates
-            plt.savefig(output_path)
-            plt.close()
-            print(f"[PostProcess] Visualization saved to {output_path}")
-        except ImportError:
-            print("[PostProcess] Matplotlib not available for visualization")
-
-def is_ball_colored(frame, x, y, w, h, ball_color='white'):
-    """Validate if detection region has ball-like colors."""
-    try:
-        roi = frame[y:y+h, x:x+w]
-        if roi.size == 0:
-            return False
-        
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        
-        if ball_color == 'white':
-            mask = cv2.inRange(hsv, (0, 0, 180), (180, 50, 255)) # Relaxed white
-        elif ball_color == 'red':
-            mask1 = cv2.inRange(hsv, (0, 70, 50), (10, 255, 255))
-            mask2 = cv2.inRange(hsv, (170, 70, 50), (180, 255, 255))
-            mask = cv2.bitwise_or(mask1, mask2)
-        else:
-            return True
-        
-        matching_pixels = cv2.countNonZero(mask)
-        total_pixels = w * h
-        color_ratio = matching_pixels / total_pixels if total_pixels > 0 else 0
-        
-        threshold = DETECTION_CONFIG.get('color_threshold', 0.2)
-        return color_ratio >= threshold
-    except Exception as e:
-        print(f"[WARN] Color validation failed: {e}")
-        return True
-
-
-def is_shoe_like(img: np.ndarray, bbox: Tuple[int, int, int, int], elongation_thresh: float = 3.0, bottom_of_frame_margin: int = 20) -> bool:
-    """Heuristic to reject detections that look like shoes."""
-    x1, y1, x2, y2 = bbox
-    w = max(1, x2 - x1)
-    h = max(1, y2 - y1)
-    
-    # Only check elongation if it's at the very bottom of the frame
-    img_h = img.shape[0]
-    if (img_h - y2) <= bottom_of_frame_margin:
-        elongation = w / h
-        if elongation > elongation_thresh:
-            return True
-
-    return False
-
-
-def is_ball_circular(img: np.ndarray, bbox: Tuple[int, int, int, int], circularity_thresh: float = 0.4) -> bool:
-    """Estimate circularity. Lower threshold allowed for motion blur."""
-    x1, y1, x2, y2 = bbox
-    crop = img[y1:y2, x1:x2]
-    if crop.size == 0: return False
-    
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    if not contours: return False
-        
-    c = max(contours, key=cv2.contourArea)
-    area = cv2.contourArea(c)
-    if area < 5: return False 
-    
-    perimeter = cv2.arcLength(c, True)
-    if perimeter == 0: return False
-        
-    circularity = 4 * np.pi * (area / (perimeter * perimeter))
-    return circularity >= circularity_thresh
-
 
 def get_yolo_detector(weights_path=None):
     global _yolo_detector
-    default_weights = "weights/ball-yolov8s.pt" 
-
     if _yolo_detector is None:
-        target_weights = weights_path if weights_path else default_weights
-        print(f"[INFO] Initializing YOLO detector with {target_weights}")
-        _yolo_detector = YOLOBallDetector(target_weights)
-    elif weights_path is not None and weights_path != _yolo_detector.model_path:
-        print(f"[INFO] Reloading YOLO weights: {weights_path}")
-        _yolo_detector.load_weights(weights_path)
-        
+        default_weights = "weights/ball-yolov8s.pt"
+        target = weights_path if weights_path else default_weights
+        if YOLOBallDetector:
+            _yolo_detector = YOLOBallDetector(target)
     return _yolo_detector
 
-# ---------------------------------------------------------
-# MAIN DETECTOR FUNCTION
-# ---------------------------------------------------------
-def detect_ball_on_frame(
-    frame, 
-    yolo_weights=None, 
-    debug=False,         
-    enable_preprocessing=None, 
-    ball_color=None,
-    conf_threshold=None, 
-    iou_threshold=None, 
-    imgsz=None,
-    frame_idx=0,
-    enable_hybrid_tracking=None  # NEW: Parameter to enable/disable hybrid tracking
-):
+def detect_ball_on_frame(frame, yolo_weights=None, frame_idx=0, batsman_box=None, wicket_line=None, **kwargs):
     """
-    Returns (frame, ball_info)
-    ball_info is { "box": [x,y,w,h], "conf": float, "source": str, "velocity": [vx,vy] } or None
+    Main API for external use. USES HYBRID STATE MACHINE.
     """
-    # 1. Config Resolution
-    if ball_color is None: ball_color = DETECTION_CONFIG.get('ball_color', 'red')
-    if conf_threshold is None: conf_threshold = DETECTION_CONFIG.get('conf_threshold', 0.2)
-    if iou_threshold is None: iou_threshold = DETECTION_CONFIG.get('iou_threshold', 0.45)
-    if imgsz is None: imgsz = DETECTION_CONFIG.get('imgsz', 640)
-    if enable_preprocessing is None: enable_preprocessing = DETECTION_CONFIG.get('enable_preprocessing', True)
-    if enable_hybrid_tracking is None: enable_hybrid_tracking = DETECTION_CONFIG.get('use_hybrid_tracking', True)
-
-    # 2. PREPROCESSING (The Key Fix)
-    detection_frame = frame
-    if enable_preprocessing and preprocess_frame is not None:
-        try:
-            # Enhance contrast/sharpness so YOLO sees the ball better
-            detection_frame, _ = preprocess_frame(frame, ball_color=ball_color)
-        except Exception as e:
-            if debug: print(f"[WARN] Preprocessing failed: {e}")
-
-    # 3. Run Inference on ENHANCED frame
-    detector = get_yolo_detector(yolo_weights)
-    yolo_detections = detector.detect(detection_frame, conf=conf_threshold, iou=iou_threshold, imgsz=imgsz)
-
-    filtered = []
-
-    # 4. Filtering Loop
-    for det in yolo_detections:
-        if len(det) == 6:
-            (x, y, w, h, confidence, cls_id) = det
-        else:
-            (x, y, w, h, confidence) = det
-        
-        # --- Filter A: Aspect Ratio & Area ---
-        aspect = (w / h) if h > 0 else 0
-        area = w * h
-        
-        if area < DETECTION_CONFIG['min_area'] or area > DETECTION_CONFIG['max_area']:
-            if debug: print(f"[DEBUG] Frame {frame_idx}: Rejected Area {area}")
-            continue
-
-        if not (DETECTION_CONFIG['aspect_ratio_min'] < aspect < DETECTION_CONFIG['aspect_ratio_max']):
-            if debug: print(f"[DEBUG] Frame {frame_idx}: Rejected Aspect Ratio {aspect:.2f}")
-            continue
-        
-        x1, y1, x2, y2 = x, y, x + w, y + h
-
-        # --- Filter B: Shoe-like rejection ---
-        if is_shoe_like(frame, (x1, y1, x2, y2)):
-            if debug: print(f"[DEBUG] Frame {frame_idx}: Rejected Shoe-like")
-            continue
-
-        # --- Filter C: Circularity check ---
-        # Note: We relaxed the threshold to 0.4
-        if not is_ball_circular(frame, (x1, y1, x2, y2)):
-            if debug: print(f"[DEBUG] Frame {frame_idx}: Rejected Non-circular")
-            continue
-
-        # --- Filter D: Color validation ---
-        if DETECTION_CONFIG.get('enable_color_filter', False):
-            if not is_ball_colored(frame, x, y, w, h, ball_color):
-                if debug: print(f"[DEBUG] Frame {frame_idx}: Rejected Color mismatch ({ball_color})")
-                continue
-
-        # --- Filter E: Motion tracking ---
-        if DETECTION_CONFIG.get('enable_motion_tracking', True):
-            center = (x + w // 2, y + h // 2)
-            if not _motion_tracker.validate_detection(center, frame_idx):
-                if debug: print(f"[DEBUG] Frame {frame_idx}: Rejected Motion trajectory")
-                continue
-        
-        # Accepted
-        filtered.append((x, y, w, h, confidence))
-
-    # 5. Prepare Result from YOLO
-    # 5. Prepare Result from YOLO
-    ball_info = None
     tracker = get_hybrid_tracker()
-    if filtered:
-        # Sort by confidence (descending)
-        filtered.sort(key=lambda x: x[4], reverse=True)
-        best_det = filtered[0]
-        
-        ball_info = {
-            "box": [best_det[0], best_det[1], best_det[2], best_det[3]],
-            "conf": float(best_det[4]),
-            "source": "yolo",
-            "velocity": list(tracker.velocity)
-        }
-        
-        # Update hybrid tracker with successful detection
-        center = (best_det[0] + best_det[2] // 2, best_det[1] + best_det[3] // 2)
-        tracker.update_with_yolo(frame, center, best_det[2], best_det[3], frame_idx)
-        print(f"[INFO] Frame {frame_idx}: Ball detected by YOLO at ({center[0]}, {center[1]}) with conf {best_det[4]:.2f}")
+    detector = get_yolo_detector(yolo_weights)
+    ball_info = tracker.process_frame(frame, frame_idx, detector, batsman_box=batsman_box, wicket_line=wicket_line)
     
-    # 6. Fallback to Hybrid Tracking if YOLO failed and enabled
-    elif enable_hybrid_tracking:
-        tracker.frames_since_yolo += 1
-        tracker.consecutive_failures += 1
-        
-        # Try optical flow
-        flow_result, flow_quality = tracker.track_with_optical_flow(frame)
-        if flow_result:
-            x = flow_result[0] - tracker.last_w // 2
-            y = flow_result[1] - tracker.last_h // 2
-            ball_info = {
-                "box": [x, y, tracker.last_w, tracker.last_h],
-                "conf": -1.0,
-                "source": "optical_flow",
-                "velocity": list(tracker.velocity)
-            }
-            print(f"[INFO] Frame {frame_idx}: Ball predicted by optical flow at ({flow_result[0]}, {flow_result[1]})")
-        else:
-            # Optical flow failed, try physics
-            physics_result = tracker.predict_with_physics(frame_idx)
-            if physics_result:
-                x = physics_result[0] - tracker.last_w // 2
-                y = physics_result[1] - tracker.last_h // 2
-                ball_info = {
-                    "box": [x, y, tracker.last_w, tracker.last_h],
-                    "conf": -2.0,
-                    "source": "physics",
-                    "velocity": list(tracker.velocity)
-                }
-                print(f"[INFO] Frame {frame_idx}: Ball predicted by physics at ({physics_result[0]}, {physics_result[1]})")
-            else:
-                # Too many failures, reset
-                if tracker.consecutive_failures > 7:
-                    tracker.reset()
-                    print(f"[INFO] Frame {frame_idx}: Too many failures, resetting tracker")
+    if ball_info:
+        box = ball_info.get('box')
+        if box is not None:
+            cv2.rectangle(frame, (box[0], box[1]), (box[0]+box[2], box[1]+box[3]), (0, 255, 0), 2)
+            cv2.putText(frame, f"{ball_info['source']}", (box[0], box[1]-10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+        if fit_trajectory and len(tracker.full_track_history) > 3:
+            res = fit_trajectory(tracker.full_track_history)
+            if res:
+                pts = np.array(res[0], dtype=np.int32).reshape((-1, 1, 2))
+                cv2.polylines(frame, [pts], False, (255, 120, 0), 2, cv2.LINE_AA)
+                curr_idx = len(tracker.full_track_history) - 1
+                if curr_idx < len(tracker.uncertainties):
+                    rad = int(math.sqrt(tracker.uncertainties[curr_idx]) * 2.0)
+                    cv2.circle(frame, (int(tracker.last_center[0]), int(tracker.last_center[1])), 
+                               max(5, rad), (200, 200, 200), 1, cv2.LINE_AA)
 
     return frame, ball_info
