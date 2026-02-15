@@ -2,6 +2,7 @@
 import cv2
 import os
 import json
+import numpy as np
 
 # Logic Modules
 # from exp_ball_detector import detect_ball_on_frame as detect_ball_on_frame
@@ -31,6 +32,12 @@ def process_frames_pipeline(
     wicket_conf=0.25,
     display=True
 ):
+    if not frame_paths:
+        print("[WARN] No frames to process.")
+        return
+    output_dir = os.path.dirname(frame_paths[0])
+    trajectory_points = []
+    first_frame = None
     # Initialize Batsman Logic
     batsman_finder = BatsmanFinder(
         iou_thresh=iou_thresh,
@@ -58,6 +65,8 @@ def process_frames_pipeline(
             if clean_frame is None:
                 print(f"[WARN] Could not read {frame_path}")
                 continue
+            if first_frame is None:
+                first_frame = clean_frame.copy()
 
             if pitch_estimator and not pitch_estimator.is_ready() and not pitch_estimator.is_failed():
                 pitch_estimator.add_frame(clean_frame)
@@ -98,48 +107,6 @@ def process_frames_pipeline(
             # ======================================================
             # 2️⃣ GATHER DATA (Run Detectors on Clean Copies)
             # ======================================================
-
-            # A. Ball Detection
-            _, det_ball = detect_ball_on_frame(frame_idx=frame_idx, frame=clean_frame.copy(), batsman_box=det_batsman_box, wicket_line=wicket_line)
-            lbw_status = None
-            lbw_decision = None
-            lbw_reason = None
-            if det_ball:
-                metadata["detections"].append({"label": "Ball", "data": det_ball})
-                state = det_ball.get("state") if isinstance(det_ball, dict) else None
-                if state:
-                    impact_point = state.get("impact_point")
-                    would_hit_stumps = state.get("would_hit_stumps")
-                    confidence = state.get("confidence")
-                    if pitch_model is None or impact_point is None or would_hit_stumps is None:
-                        lbw_status = "INSUFFICIENT DATA"
-                        lbw_decision = DECISION_NO_DECISION
-                        lbw_reason = "insufficient_data"
-                    elif confidence is None or confidence < 0.55:
-                        lbw_status = "LOW CONFIDENCE"
-                        lbw_decision = DECISION_NO_DECISION
-                        lbw_reason = "low_confidence"
-                    else:
-                        lbw_decision, lbw_reason = compute_lbw_decision(
-                            impact_point=impact_point,
-                            pitch_model=pitch_model,
-                            would_hit_stumps=would_hit_stumps,
-                            confidence=confidence
-                        )
-            else:
-                lbw_status = "TRACK LOST"
-                lbw_decision = DECISION_NO_DECISION
-                lbw_reason = "track_lost"
-
-            if lbw_decision:
-                metadata["lbw_decision"] = {
-                    "decision": lbw_decision,
-                    "reason": lbw_reason,
-                    "status": lbw_status,
-                    "impact_point": state.get("impact_point") if det_ball and state else None,
-                    "would_hit_stumps": state.get("would_hit_stumps") if det_ball and state else None,
-                    "confidence": state.get("confidence") if det_ball and state else None
-                }
 
             # B. Wicket Detection
             _, det_wickets = detect_wicket(clean_frame.copy(), conf=wicket_conf)
@@ -190,6 +157,66 @@ def process_frames_pipeline(
                     # Re-init finder
                     batsman_finder = BatsmanFinder(iou_thresh=iou_thresh, consec_required=consec_required)
                     batsman_tracker = BatsmanTracker()
+
+            # A. Ball Detection (after batsman/wicket are known for impact logic)
+            _, det_ball = detect_ball_on_frame(
+                frame_idx=frame_idx,
+                frame=clean_frame.copy(),
+                batsman_box=det_batsman_box,
+                wicket_line=wicket_line
+            )
+            lbw_status = None
+            lbw_decision = None
+            lbw_reason = None
+            if det_ball:
+                metadata["detections"].append({"label": "Ball", "data": det_ball})
+                state = det_ball.get("state") if isinstance(det_ball, dict) else None
+                impact_frame = state.get("impact_frame") if state else None
+                box = det_ball.get("box") if isinstance(det_ball, dict) else None
+                if box and (impact_frame is None or frame_idx <= impact_frame):
+                    bx, by, bw, bh = [int(v) for v in box]
+                    cx = int(bx + bw / 2)
+                    cy = int(by + bh / 2)
+                    trajectory_points.append((cx, cy))
+                    print(f"[BALL] Frame {frame_idx}: ({cx}, {cy})")
+                elif box:
+                    print(f"[BALL] Frame {frame_idx}: impact reached, skipping trajectory")
+                else:
+                    print(f"[BALL] Frame {frame_idx}: no box")
+
+                if state:
+                    impact_point = state.get("impact_point")
+                    would_hit_stumps = state.get("would_hit_stumps")
+                    confidence = state.get("confidence")
+                    if pitch_model is None or impact_point is None or would_hit_stumps is None:
+                        lbw_status = "INSUFFICIENT DATA"
+                        lbw_decision = DECISION_NO_DECISION
+                        lbw_reason = "insufficient_data"
+                    elif confidence is None or confidence < 0.55:
+                        lbw_status = "LOW CONFIDENCE"
+                        lbw_decision = DECISION_NO_DECISION
+                        lbw_reason = "low_confidence"
+                    else:
+                        lbw_decision, lbw_reason = compute_lbw_decision(
+                            impact_point=impact_point,
+                            pitch_model=pitch_model,
+                            would_hit_stumps=would_hit_stumps,
+                            confidence=confidence
+                        )
+            else:
+                lbw_status = "TRACK LOST"
+                lbw_decision = DECISION_NO_DECISION
+                lbw_reason = "track_lost"
+
+            if lbw_decision:
+                metadata["lbw_decision"] = {
+                    "decision": lbw_decision,
+                    "reason": lbw_reason,
+                    "status": lbw_status,
+                    "impact_point": state.get("impact_point") if det_ball and state else None,
+                    "would_hit_stumps": state.get("would_hit_stumps") if det_ball and state else None,
+                    "confidence": state.get("confidence") if det_ball and state else None
+                }
 
 
             # F. Pose Estimation
@@ -275,4 +302,11 @@ def process_frames_pipeline(
     finally:
         print("[INFO] Cleaning up resources...")
         cv2.destroyAllWindows()
+        if first_frame is not None and trajectory_points:
+            traj_frame = first_frame.copy()
+            pts = np.array(trajectory_points, dtype=np.int32).reshape((-1, 1, 2))
+            cv2.polylines(traj_frame, [pts], False, (0, 0, 255), 2, cv2.LINE_AA)
+            out_path = os.path.join(output_dir, "ball_trajectory.jpg")
+            cv2.imwrite(out_path, traj_frame)
+            print(f"[INFO] Trajectory frame saved: {out_path}")
         print("[INFO] Pipeline processing finished.")

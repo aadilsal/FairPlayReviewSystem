@@ -227,11 +227,12 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
         
         # Handle Dictionary Format {'box': [x,y,w,h], 'conf': ...}
         if isinstance(det_ball, dict) and "box" in det_ball:
-            x, y, w, h = det_ball["box"]
-            bx = int(x + w // 2)
-            by = int(y + h // 2)
-            br = int(max(w, h) // 2)
-            valid_ball = True
+            if det_ball["box"] is not None:
+                x, y, w, h = det_ball["box"]
+                bx = int(x + w // 2)
+                by = int(y + h // 2)
+                br = int(max(w, h) // 2)
+                valid_ball = True
             
         # Handle legacy tuple format (x, y, radius) just in case
         elif isinstance(det_ball, (list, tuple)) and len(det_ball) >= 3:

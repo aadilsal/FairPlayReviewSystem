@@ -83,9 +83,11 @@ DETECTION_CONFIG = {
     'yolo_gate_px': 70.0,
     'optical_gate_px': 45.0,
     'csrt_gate_px': 25.0,
+    'tld_gate_px': 55.0,
     'yolo_noise_scale': 1.0,
     'optical_noise_scale': 2.5,
     'csrt_noise_scale': 6.0,
+    'tld_noise_scale': 5.0,
     'guided_noise_scale': 4.0,
     'high_confidence': 0.65,
     'confidence_decay': 0.03,
@@ -144,6 +146,7 @@ class HybridBallTracker:
         self.kf = None
         self.kf_initialized = False
         self.csrt = None
+        self.tld = None
         self.last_center = None
         self.last_box = None
         self.prev_frame_gray = None
@@ -290,6 +293,7 @@ class HybridBallTracker:
             fit_pred = self._get_fit_prediction(frame_idx)
             self.last_fit_pred = fit_pred
             of_success, of_pos, of_qual = self._track_optical_flow(frame_gray)
+            tld_success, tld_pos, tld_box = self._track_tld(frame)
             candidates = self._run_yolo_detection(processed_frame, yolo_detector, frame_idx)
             
             best_candidate = None
@@ -329,6 +333,16 @@ class HybridBallTracker:
                 if not self._is_candidate_consistent(candidate_pos, candidate_conf, fit_pred):
                     candidate_pos = None
                     source = "unknown"
+
+            if not candidate_pos and tld_success and tld_pos is not None:
+                candidate_pos = tld_pos
+                source = "tld"
+                candidate_conf = 0.5
+                if tld_box is not None:
+                    self.last_box = tld_box
+                if not self._is_candidate_consistent(candidate_pos, candidate_conf, fit_pred):
+                    candidate_pos = None
+                    source = "unknown"
             
             if not candidate_pos and self.csrt:
                 success, box = self.csrt.update(frame)
@@ -363,12 +377,16 @@ class HybridBallTracker:
                         candidate_pos = fit_pred
                         source = "guided_recovery"
                         candidate_conf = 0.3
+            if candidate_pos and source == "tld":
+                if not self._is_measurement_acceptable(candidate_pos, source, kf_pred_pos):
+                    candidate_pos = None
+                    source = "physics"
 
             if candidate_pos:
                 self.last_center = candidate_pos
                 self.full_track_history.append(candidate_pos)
                 if self.kf:
-                    should_update = source in ["yolo", "optical_flow", "csrt", "guided_recovery"]
+                    should_update = source in ["yolo", "optical_flow", "csrt", "tld", "guided_recovery"]
                     if should_update:
                         noise_scale = self._measurement_noise_scale(source)
                         if noise_scale is not None:
@@ -383,7 +401,7 @@ class HybridBallTracker:
                 else:
                     self.uncertainties.append(10.0)
                 
-                used_measurement = source in ["yolo", "optical_flow", "csrt"]
+                used_measurement = source in ["yolo", "optical_flow", "csrt", "tld"]
                 self._update_confidence(candidate_conf, used_measurement)
                 if used_measurement:
                     self.frames_without_measurement = 0
@@ -395,7 +413,7 @@ class HybridBallTracker:
 
                 self._enforce_physics_constraints()
                 self._refresh_ball_state()
-                if source in ["yolo", "optical_flow", "csrt", "guided_recovery"]:
+                if source in ["yolo", "optical_flow", "csrt", "tld", "guided_recovery"]:
                     self._update_fit_history(frame_idx, candidate_pos)
                 ball_info = self._build_ball_info(source)
                 if used_measurement:
@@ -618,6 +636,8 @@ class HybridBallTracker:
             return DETECTION_CONFIG['optical_noise_scale']
         if source == "csrt":
             return DETECTION_CONFIG['csrt_noise_scale']
+        if source == "tld":
+            return DETECTION_CONFIG['tld_noise_scale']
         if source == "guided_recovery":
             return DETECTION_CONFIG['guided_noise_scale']
         return None
@@ -642,6 +662,8 @@ class HybridBallTracker:
                 gate = DETECTION_CONFIG['yolo_gate_px']
             elif source == "optical_flow":
                 gate = DETECTION_CONFIG['optical_gate_px']
+            elif source == "tld":
+                gate = DETECTION_CONFIG['tld_gate_px']
             else:
                 gate = DETECTION_CONFIG['csrt_gate_px']
             if dist > gate:
@@ -776,6 +798,13 @@ class HybridBallTracker:
         except Exception:
             self.csrt = None
 
+        try:
+            if not self.tld:
+                self.tld = cv2.TrackerTLD_create()
+            self.tld.init(frame, (bx, by, bw, bh))
+        except Exception:
+            self.tld = None
+
     def _run_yolo_detection(self, frame, detector, frame_idx):
         if frame is None or frame.size == 0 or detector is None: return []
         try:
@@ -807,6 +836,22 @@ class HybridBallTracker:
         except Exception:
             pass
         return False, None, 0.0
+
+    def _track_tld(self, frame):
+        if self.tld is None:
+            return False, None, None
+        try:
+            ok, box = self.tld.update(frame)
+            if not ok:
+                return False, None, None
+            x, y, w, h = [int(v) for v in box]
+            if w <= 0 or h <= 0:
+                return False, None, None
+            cx = float(x + w / 2.0)
+            cy = float(y + h / 2.0)
+            return True, (cx, cy), [x, y, w, h]
+        except Exception:
+            return False, None, None
 
 _hybrid_tracker = None
 _yolo_detector = None
