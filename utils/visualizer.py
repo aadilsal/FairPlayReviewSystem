@@ -99,29 +99,76 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
                 cv2.putText(vis_frame, "Pad", (px, max(0, py - 5)), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-    # 5. Draw Ball (Red) + Label
+    # # 5. Draw Ball (Red) + Label
+    # if det_ball:
+    #     bx, by, br = 0, 0, 0
+    #     valid_ball = False
+        
+    #     # Handle Dictionary Format {'box': [x,y,w,h], 'conf': ...}
+    #     if isinstance(det_ball, dict) and "box" in det_ball:
+    #         x, y, w, h = det_ball["box"]
+    #         bx = int(x + w // 2)
+    #         by = int(y + h // 2)
+    #         br = int(max(w, h) // 2)
+    #         valid_ball = True
+            
+    #     # Handle legacy tuple format (x, y, radius) just in case
+    #     elif isinstance(det_ball, (list, tuple)) and len(det_ball) >= 3:
+    #         bx, by, br = int(det_ball[0]), int(det_ball[1]), int(det_ball[2])
+    #         valid_ball = True
+
+    #     if valid_ball:
+    #         cv2.circle(vis_frame, (bx, by), br, (0, 0, 255), 2)
+    #         cv2.circle(vis_frame, (bx, by), 2, (0, 0, 255), -1)
+    #         cv2.putText(vis_frame, "Ball", (bx + br + 5, by), 
+    #                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
+# 5. Draw Ball (Red) + Label
     if det_ball:
         bx, by, br = 0, 0, 0
         valid_ball = False
         
+        # --- NEW: Draw ROI Search Area (Green Box) ---
+        if isinstance(det_ball, dict) and "roi_box" in det_ball:
+            # roi_box is [x1, y1, x2, y2]
+            rx1, ry1, rx2, ry2 = det_ball["roi_box"]
+            
+            # Draw rectangle (Green, thin)
+            cv2.rectangle(vis_frame, (rx1, ry1), (rx2, ry2), (0, 255, 0), 1)
+            
+            # Label it "ROI" (Small text)
+            cv2.putText(vis_frame, "ROI", (rx1, ry1 - 5), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+
         # Handle Dictionary Format {'box': [x,y,w,h], 'conf': ...}
         if isinstance(det_ball, dict) and "box" in det_ball:
+            # Note: Ensure your detector returns box as [x_center, y_center, w, h] or [x1, y1, w, h]
+            # Assuming [x_center, y_center, w, h] based on your circle logic below:
             x, y, w, h = det_ball["box"]
-            bx = int(x + w // 2)
+            bx = int(x) # if x is center
+            by = int(y) # if y is center
+            # OR if x,y are top-left:
+            # bx = int(x + w // 2)
+            # by = int(y + h // 2)
+            
+            # Let's stick to the logic you had (assuming x,y are top-left based on w//2 add):
+            bx = int(x + w // 2) 
             by = int(y + h // 2)
             br = int(max(w, h) // 2)
-            valid_ball = True
             
-        # Handle legacy tuple format (x, y, radius) just in case
-        elif isinstance(det_ball, (list, tuple)) and len(det_ball) >= 3:
-             bx, by, br = int(det_ball[0]), int(det_ball[1]), int(det_ball[2])
-             valid_ball = True
+            # Draw GHOST indicator if applicable
+            if det_ball.get('ghost', False):
+                # Draw Dashed/Different color for Ghost (e.g., Cyan)
+                cv2.circle(vis_frame, (bx, by), br, (255, 255, 0), 1, cv2.LINE_AA)
+                cv2.putText(vis_frame, "Ghost", (bx + br + 5, by), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            else:
+                # Standard Detection (Red)
+                cv2.circle(vis_frame, (bx, by), br, (0, 0, 255), 2)
+                cv2.circle(vis_frame, (bx, by), 2, (0, 0, 255), -1)
+                cv2.putText(vis_frame, "Ball", (bx + br + 5, by), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-        if valid_ball:
-            cv2.circle(vis_frame, (bx, by), br, (0, 0, 255), 2)
-            cv2.circle(vis_frame, (bx, by), 2, (0, 0, 255), -1)
-            cv2.putText(vis_frame, "Ball", (bx + br + 5, by), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
     # 6. Draw Wickets (Orange/Green) + Label
     if det_wickets:

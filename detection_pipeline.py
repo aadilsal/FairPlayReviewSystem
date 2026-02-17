@@ -3,7 +3,7 @@ import os
 import json
 import numpy as np
 
-from ball_detector import detect_ball_on_frame
+from ball_detector import detect_ball
 from pose_estimator import estimate_pose
 from person_detector import detect_persons
 from pad_detector import detect_pads
@@ -66,7 +66,7 @@ def process_frames_pipeline(
         det_pads = []
 
         # A. Ball Detection
-        _, det_ball = detect_ball_on_frame(frame_idx=frame_idx, frame=frame.copy())
+        det_ball = detect_ball(frame=frame.copy(), frame_idx=frame_idx)
         if det_ball:
             metadata["detections"].append({"label": "Ball", "data": det_ball})
 
