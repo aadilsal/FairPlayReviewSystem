@@ -1,74 +1,65 @@
-# ball_detector.py
-    - Entry point for ball detection pipeline with state machine
-    - BallDetector class: manages three detection states (SCANNING, VALIDATING, TRACKING)
-    - STATE_SCANNING: full-frame YOLO detection, searches for ball candidates
-    - STATE_VALIDATING: confirms detection persists for required frames via validation_counter
-    - STATE_TRACKING: predicts next position using Kalman filter, crops ROI based on velocity
-    - Uses BallKalmanInterpolator for position smoothing and prediction
-    - detect(): main detection function - accepts frame and frame_idx
-    - Uses global YOLOBallDetector via get_global_yolo_detector()
-    - Calls yolo_detect_ball() or yolo_detect_ball_roi() depending on state
-    - Filters detections via filter_and_select_ball_detection()
-    - Uses ball_color from DETECTION_CONFIG
-    - Returns ball_info dict: box, conf, interpolated_position
-    - Handles missed detections with miss_streak counter, resets on MAX_MISS_STREAK
-    - Maintains detection history and last_ball_info for continuity
-    - Logs state transitions and detection results with frame index
-    - reset(): clears state, validation counters, and Kalman filter
-    - get_global_ball_detector(): singleton pattern for global detector instance
+## Cricket Ball Detection & Post-Processing System Architecture
 
-# config.py
-    - Central configuration for dual-model ball detection pipeline
-    - DETECTION_CONFIG: dual model paths (high precision + high recall), conf/iou thresholds
-    - Area constraints: min_area (25px), max_area (8000px)
-    - Aspect ratio filtering: min (0.5), max (2.5)
-    - Color filtering: ball_color, enable_color_filter toggle, color_threshold (0.2)
-    - Motion tracking: enable_motion_tracking, min_velocity, max_trajectory_deviation
-    - Hybrid tracking: use_hybrid_tracking, optical_flow_quality_threshold (0.7)
-    - Physics prediction: physics_prediction_max_frames (5), gravity_constant (0.5), velocity_window_size (5)
-    - ROI_CONFIG: adaptive crop sizing (BASE_CROP_SIZE: 150px, MAX_CROP_SIZE: 320px), velocity-based expansion
-    - STATE_CONFIG: validation frames (2), max miss streak (5) for state machine
-    - POSTPROCESS_CONFIG: gap filling (10), smoothing (window: 5, poly_order: 2), interpolation validation
-    - Used across all pipeline modules for consistent detection behavior
+This system implements a multi-stage **"Anchor & Rescue"** pipeline. It combines deep learning, discriminative correlation filters, and kinematic modeling to maintain a continuous ball trajectory through occlusions and bounces.
 
-# filters.py
-    - Validates YOLO detections to reduce false positives
-    - is_shoe_like(): checks if bbox is shoe-shaped (high aspect ratio, near bottom of frame)
-    - is_ball_circular(): analyzes contour circularity via Otsu thresholding and perimeter-area ratio
-    - is_ball_colored(): HSV color filtering for white/red balls, configurable threshold (default 0.2)
-    - filter_ball_detection(): applies shoe, circularity, and color filters in sequence
-    - filter_and_select_ball_detection(): filters detections by area and aspect ratio constraints, returns highest confidence match
+### 1. Core Detection & State Management
 
-# interpolation.py
-    - BallKalmanInterpolator: position smoothing via Kalman filter
-    - State vector: [x, y, vx, vy] (position and velocity)
-    - __init__(): configures filter matrices (F, H, P, R, Q) with standard Kalman parameters
-    - update(): accepts measurement (x, y), performs prediction and update steps, returns smoothed position
-    - predict_next(): predicts next position without measurement update, useful for tracking gaps
-    - get_velocity(): returns current velocity vector (dx, dy) for motion prediction
-    - reset(): clears filter state, optionally sets initial position for reinitialization
-    - interpolate_trajectory(): legacy wrapper function for ball_infos list, processes detection history
-    - Handles missing detections gracefully with Kalman predictions
-    - Returns interpolated positions as tuples
-    - Improves trajectory continuity and handles frame drops
-    - Called from ball_detector to post-process detections and fill tracking gaps
+*The entry point manages frame-by-frame processing, coordinate normalization, and state transitions.*
+
+* **`ball_detector.py`**: The primary controller. It handles horizontal center-cropping for performance and remaps coordinates. It utilizes a three-state machine: **Scanning**, **Validating**, and **Tracking**.
+* **`ball_detector_helpers.py`**: Implements the logic for each state:
+* **Scanning**: Full-frame YOLO search via `yolo_detect.py`.
+* **Validating**: Confirms temporal consistency over a fixed frame count.
+* **Tracking**: Predicts positions via Kalman Filter and performs localized searches in a **Dynamic ROI** (Region of Interest) scaled by ball velocity.
 
 
-# yolo_detect.py
-    - YOLOBallDetector: YOLOv8 wrapper class for dual-model ball detection
-    - __init__(): initializes two models (model1, model2) and device (CUDA/CPU), falls back to config paths if not provided
-    - Model 1 (model1_path): high-precision ball detection for full-frame SCANNING state
-    - Model 2 (model2_path): high-recall detection for ROI validation in VALIDATING/TRACKING states
-    - Gracefully handles model loading failures, logs errors while continuing if one model unavailable
-    - detect(): runs Model 1 inference on full frame, filters detections by ball-related class keywords
-    - Converts YOLO tensor outputs to numpy arrays, extracts bbox (x, y, w, h), confidence, class_id
-    - Handles variable class name formats (dict or list from model.names attribute)
-    - detect_roi(): runs Model 2 inference on cropped ROI, maps detections back to global frame coordinates
-    - Uses offset_coords to adjust detected positions relative to crop region
-    - Both methods filter by confidence and IoU thresholds from config
-    - Returns detections as tuples: (x, y, w, h, confidence, class_id)
-    - get_global_yolo_detector(): singleton pattern, reinitializes if model paths change in config
-    - yolo_detect_ball(): wrapper for full-frame detection using DETECTION_CONFIG thresholds and GLOBAL_CONFIG imgsz
-    - yolo_detect_ball_roi(): wrapper for ROI detection with offset coordinate mapping
-    - Called from ball_detector state machine for primary and validation detection pipelines
+* **`validator.py`**: Provides geometric and CV "gates" (circularity, color, area, and shoe-like heuristics) to filter false positives before they enter the state machine.
+
+### 2. Trajectory Modeling & Kinematics
+
+*These modules provide the physical "ground truth" used to validate and rescue missing detections.*
+
+* **`trajectory.py`**: Fits degree-2 polynomials to high-confidence detections:
+
+$$y(t) = at^2 + bt + c$$
+
+
+
+It detects **bounce frames** by identifying vertical velocity ($v_y$) sign flips, splitting the trajectory into independent segments.
+* **`interpolation.py`**: Implements a **2D Kalman Filter**. It features **segment-aware smoothing** that resets at bounce frames to preserve the sharp "V" impact shape.
+* **`kinematics.py`**: Provides parabolic projection and a geometric intersection solver to find sub-frame meeting points of motion arcs during occlusions.
+
+### 3. Post-Processing & "Rescue" Pipeline
+
+*This stage fills gaps where the real-time detector failed using a 5-phase sequence.*
+
+1. **Gap Classification (`gap_classifier.py`)**: Labels missing segments as *occlusion*, *bounce_adjacent*, or *mid_flight*.
+2. **Low-Conf YOLO Rescue**: Re-runs YOLO at an ultra-low threshold ($conf \approx 0.05$) within a spatial corridor defined by the physics model.
+3. **CSRT Tracking (`csrt_tracker.py`)**: Runs bidirectional (forward and backward) tracking from the nearest valid anchors.
+4. **Agreement & Merge**: Reconciles trackers; if they disagree during an occlusion, the system flags the frame for kinematic intersection.
+5. **Final Smoothing**: Applies the segment-aware Kalman smoother to produce the final continuous path.
+
+### 4. System Support & Output
+
+* **`yolo_detect.py`**: A dual-model wrapper. **Model 1** is optimized for global scanning; **Model 2** is used for high-recall ROI refinement.
+* **`config.py`**: Centralized repository for detection thresholds, filter parameters, and physics heuristics.
+* **`output.py`**: Formats results into JSON, assigning a **Confidence Tier** (High/Med/Low) based on the data source (e.g., YOLO anchor vs. Kinematic fallback).
+
+---
+
+### Data Flow Summary
+
+1. **Real-Time**: `ball_detector` $\rightarrow$ `yolo_detect` $\rightarrow$ `validator` $\rightarrow$ `ball_infos`.
+2. **Modeling**: `ball_infos` $\rightarrow$ `trajectory` (detect bounces/fit arcs).
+3. **Rescue**: `gap_classifier` $\rightarrow$ `csrt_tracker` / `kinematics` $\rightarrow$ `ball_infos` (updated).
+4. **Finalize**: `interpolation` (smoothing) $\rightarrow$ `output`.
+
+---
+
+### Documentation Links
+
+* [Core Details](core/core.md)
+* [Engines Details](engines/engines.md)
+* [Pipeline Details](pipeline/pipeline.md)
+* [Utils Details](utils/utils.md)
 

@@ -3,7 +3,7 @@ import os
 import json
 import numpy as np
 
-from ball_detector import detect_ball
+from BallDetection.pipeline.ball_detector import detect_ball
 from pose_estimator import estimate_pose
 from person_detector import detect_persons
 from pad_detector import detect_pads

@@ -128,7 +128,14 @@ def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, 
         bx, by, br = 0, 0, 0
         valid_ball = False
         
-        # --- NEW: Draw ROI Search Area (Green Box) ---
+        # --- Draw Crop Area (Blue Box) ---
+        if isinstance(det_ball, dict) and "crop_box" in det_ball:
+            cx1, cy1, cx2, cy2 = map(int, det_ball["crop_box"])
+            cv2.rectangle(vis_frame, (cx1, cy1), (cx2, cy2), (255, 0, 0), 2)
+            cv2.putText(vis_frame, "Crop Area", (cx1 + 5, cy1 + 25), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+
+        # --- Draw ROI Search Area (Green Box) ---
         if isinstance(det_ball, dict) and "roi_box" in det_ball:
             # roi_box is [x1, y1, x2, y2]
             rx1, ry1, rx2, ry2 = det_ball["roi_box"]
