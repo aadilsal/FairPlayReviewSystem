@@ -47,8 +47,22 @@ You should see:
 
 - ✓ matches
 - ✓ notifications
+- ✓ notification_settings
 - ✓ reviews
+- ✓ detection_results
 - ✓ users
+
+### 4.1️⃣ Apply Latest Match Lifecycle Migration
+
+Run this migration in SQL Editor:
+
+- supabase/migrations/20260315_auto_complete_stale_matches_24h.sql
+
+This adds:
+
+- completed_by_system, auto_completed_at, completion_reason on matches
+- auto_complete_stale_matches(timeout_hours, target_user_id) SQL function
+- Optional pg_cron schedule (every 30 minutes) if pg_cron is available
 
 ### 5️⃣ Test Your API
 
@@ -106,14 +120,35 @@ JOIN matches m ON r.match_id = m.id;
 2. **Passwords**: The sample passwords are hashed with bcrypt
 3. **Production**: Change all passwords and secrets for production use
 4. **API Key**: Use the publishable (anon) key in your frontend, service role key only in backend
+5. **Service Role Key**: Set SUPABASE_SERVICE_ROLE_KEY in backend .env for server-side maintenance and cross-table writes
+6. **Auto-complete**: in-progress matches are auto-completed after 24h inactivity when migration is applied
 
 ## 🎯 Next Steps
 
 1. ✅ Database is set up
 2. ✅ API is configured
-3. 🔜 Start your FastAPI server
-4. 🔜 Test endpoints using /docs
-5. 🔜 Connect your React Native frontend
+3. ✅ Apply 20260315_auto_complete_stale_matches_24h.sql
+4. 🔜 Start your FastAPI server
+5. 🔜 Test endpoints using /docs
+6. 🔜 Connect your React Native frontend
+
+## 🔎 Auto-complete Verification
+
+Run this query to verify new columns and function exist:
+
+```sql
+SELECT column_name
+FROM information_schema.columns
+WHERE table_schema = 'public'
+    AND table_name = 'matches'
+    AND column_name IN ('completed_by_system', 'auto_completed_at', 'completion_reason')
+ORDER BY column_name;
+
+SELECT routine_name
+FROM information_schema.routines
+WHERE routine_schema = 'public'
+    AND routine_name = 'auto_complete_stale_matches';
+```
 
 ## 🆘 Need Help?
 

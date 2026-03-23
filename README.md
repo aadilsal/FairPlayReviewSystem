@@ -4,6 +4,15 @@ A comprehensive cricket analysis system for fair play review, featuring advanced
 
 ## Features
 
+### API and Match Lifecycle
+
+- FastAPI backend with Supabase integration for auth, matches, reviews, notifications, profile, and detection workflows
+- User-scoped match ownership and secure per-user CRUD access
+- Match stale-state handling: in-progress matches are auto-completed after 24 hours of inactivity
+- Manual completion is still supported using normal match update calls
+- Match heartbeat endpoint to keep active matches from being auto-completed while users are actively working
+- Automatic notifications when stale matches are auto-completed by the system
+
 ### 🏏 Advanced Ball Detection
 
 - **YOLOv8-based Detection**: Custom-trained model for cricket ball detection
@@ -61,6 +70,27 @@ pip install -r requirements.txt
 ```bash
 python main.py --input test_videos/sample.mp4 --fps 30 --person-conf 0.5 --bat-conf 0.1
 ```
+
+### Backend API
+
+```bash
+uvicorn API.main_api:app --reload --host 0.0.0.0 --port 8000
+```
+
+Open interactive API docs at:
+
+- http://localhost:8000/docs
+
+### Match Status Behavior
+
+- Allowed statuses: scheduled, in_progress, completed, cancelled, postponed
+- Auto-complete timeout: 24 hours of inactivity while status is in_progress
+- Completion metadata columns: completed_by_system, auto_completed_at, completion_reason
+
+### Match Maintenance Endpoints
+
+- POST /api/matches/maintenance/auto-complete?timeout_hours=24 triggers stale in-progress auto-completion for the current user
+- POST /api/matches/{match_id}/heartbeat refreshes activity timestamp for an active in-progress match
 
 ### Ball Detection Only
 

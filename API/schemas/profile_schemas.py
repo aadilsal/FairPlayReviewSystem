@@ -2,15 +2,17 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 
 class ProfileUpdate(BaseModel):
-    username: Optional[str]
-    email: Optional[EmailStr]
-    avatar: Optional[str]
+    fname: Optional[str] = None
+    lname: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    avatar: Optional[str] = None
 
 class ProfileOut(BaseModel):
     id: int
-    username: str
+    name: str
     email: EmailStr
-    avatar: Optional[str]
+    avatar: Optional[str] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
