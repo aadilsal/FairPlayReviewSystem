@@ -128,9 +128,9 @@ def process_frames_pipeline(
                 det_pose.extend(kps)
 
         # G. Pad Detection 
-        # _, det_pads = detect_pads(frame.copy(), det_pose, conf=pad_conf)
-        # for p in det_pads:
-        #     metadata["detections"].append({"label": "Pad", "box": p["box"], "conf": p.get("conf", 0.0)})
+        _, det_pads = detect_pads(frame.copy(), det_pose, conf=pad_conf)
+        for p in det_pads:
+            metadata["detections"].append({"label": "Pad", "box": p["box"], "conf": p.get("conf", 0.0)})
 
         vis_frame = visualize_frame(
             frame.copy(),

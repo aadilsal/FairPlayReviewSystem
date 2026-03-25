@@ -61,7 +61,7 @@ def visualize_batsman(det_batsman_box, det_persons, vis_frame):
     if det_batsman_box:
         bx, by, bw, bh = det_batsman_box
         color = (255, 0, 0) 
-        cv2.rectangle(vis_frame, (bx, by), (bx+bw, by+bh), color, 3)
+        cv2.rectangle(vis_frame, (bx, by), (bx+bw, by+bh), color, 2)
         cv2.putText(vis_frame, "Batsman", (bx, max(0, by-10)), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
     else:
@@ -83,16 +83,39 @@ def visualize_bat(det_bats, vis_frame):
             cv2.putText(vis_frame, "Bat", (bx, max(0, by - 5)), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-def visualize_pads(det_pads, vis_frame):
+def visualize_pads(det_pads, vis_frame, show_feet=False, use_union=True):
     if not det_pads:
         return
-    for p in det_pads:
-        if "box" in p:
-            px, py, pw, ph = map(int, p["box"])
-            color = (255, 255, 0)
-            cv2.rectangle(vis_frame, (px, py), (px+pw, py+ph), color, 2)
-            cv2.putText(vis_frame, "Pad", (px, max(0, py - 5)), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    
+    pads = [p for p in det_pads if "Foot" not in p.get("label", "")]
+    if not pads:
+        return
+
+    if use_union and len(pads) > 1:
+        coords = []
+        for p in pads:
+            x, y, w, h = p["box"]
+            coords.append([x, y, x + w, y + h])
+        
+        coords = np.array(coords)
+        
+        ux1 = np.min(coords[:, 0])
+        uy1 = np.min(coords[:, 1])
+        ux2 = np.max(coords[:, 2])
+        uy2 = np.max(coords[:, 3])
+        
+        display_list = [{
+            "label": "Total_Pads",
+            "box": [ux1, uy1, ux2 - ux1, uy2 - uy1]
+        }]
+    else:
+        display_list = pads
+        
+    for p in display_list:
+        px, py, pw, ph = map(int, p["box"])
+        cv2.rectangle(vis_frame, (px, py), (px + pw, py + ph), (255, 255, 0), 2)
+        cv2.putText(vis_frame, p["label"], (px, max(0, py - 5)), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
 
 def visualize_ball(det_ball, vis_frame, frame_idx):
     if not det_ball or frame_idx >= len(det_ball):
