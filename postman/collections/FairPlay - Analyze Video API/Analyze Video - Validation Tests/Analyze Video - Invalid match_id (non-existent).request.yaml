@@ -1,0 +1,26 @@
+$kind: http-request
+name: 'Analyze Video - Invalid match_id (non-existent)'
+method: POST
+url: '{{baseUrl}}/api/analyze-video'
+order: 2000
+queryParams:
+  - key: match_id
+    value: '999999'
+body:
+  type: formdata
+  content:
+    - key: video_file
+      type: file
+      src: ''
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 404", function () {
+          pm.response.to.have.status(404);
+      });
+
+      pm.test("Response JSON has message containing not found", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.message.toLowerCase()).to.include("not found");
+      });

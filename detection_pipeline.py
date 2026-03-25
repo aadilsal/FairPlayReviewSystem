@@ -24,7 +24,8 @@ def process_frames_pipeline(
     consec_required,
     wicket_conf,
     preprocess,
-    display
+    display,
+    wicket_override=None,
 ):
     batsman_finder = BatsmanFinder(
         iou_thresh=iou_thresh,
@@ -73,9 +74,13 @@ def process_frames_pipeline(
         det_pads = []
 
         # B. Wicket Detection
-        _, det_wickets = detect_wicket(frame.copy(), conf=wicket_conf)
-        if det_wickets:
+        if wicket_override:
+            det_wickets = wicket_override
             metadata["detections"].extend(det_wickets)
+        else:
+            _, det_wickets = detect_wicket(frame.copy(), conf=wicket_conf)
+            if det_wickets:
+                metadata["detections"].extend(det_wickets)
         
         # C. Bat Detection
         _, det_bats = detect_bat(frame.copy(), conf=bat_conf)

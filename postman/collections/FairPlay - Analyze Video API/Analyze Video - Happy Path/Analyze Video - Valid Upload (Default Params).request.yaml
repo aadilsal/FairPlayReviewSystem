@@ -1,0 +1,78 @@
+$kind: http-request
+name: 'Analyze Video - Valid Upload (Default Params)'
+method: POST
+url: '{{baseUrl}}/api/analyze-video'
+order: 1000
+queryParams:
+  - key: match_id
+    value: '{{matchId}}'
+body:
+  type: formdata
+  content:
+    - key: video_file
+      type: file
+      src: ''
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 200", function () {
+          pm.response.to.have.status(200);
+      });
+
+      pm.test("Response JSON has status equal to success", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.status).to.eql("success");
+      });
+
+      pm.test("Response JSON has data.decision", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.decision).to.exist;
+      });
+
+      pm.test("Response JSON has data.status equal to completed", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.status).to.eql("completed");
+      });
+
+      pm.test("Response JSON has data.match_id as a number", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.match_id).to.be.a("number");
+      });
+
+      pm.test("Response JSON has data.frame_count greater than 0", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.frame_count).to.be.above(0);
+      });
+
+      pm.test("Response JSON has data.processing_time_ms as a number", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.processing_time_ms).to.be.a("number");
+      });
+
+      pm.test("Response JSON has data.impact", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.impact).to.exist;
+      });
+
+      pm.test("Response JSON has data.pitch", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.pitch).to.exist;
+      });
+
+      pm.test("Response JSON has data.wickets", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.wickets).to.exist;
+      });
+
+      pm.test("Response JSON has data.confidence between 0 and 1", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.confidence).to.be.a("number");
+          pm.expect(jsonData.data.confidence).to.be.at.least(0);
+          pm.expect(jsonData.data.confidence).to.be.at.most(1);
+      });
+
+      pm.test("Response JSON has data.summary_stats", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.summary_stats).to.exist;
+      });

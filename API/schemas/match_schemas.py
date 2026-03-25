@@ -1,25 +1,32 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 
 class MatchBase(BaseModel):
-    team_a: str
-    team_b: str
-    date: datetime
-    status: str
+    name: str
+    teams: str
+    venue: Optional[str] = None
+    date: str
+    status: str = "upcoming"
 
 class MatchCreate(MatchBase):
     pass
 
 class MatchUpdate(BaseModel):
-    team_a: Optional[str]
-    team_b: Optional[str]
-    date: Optional[datetime]
-    status: Optional[str]
+    name: Optional[str] = None
+    teams: Optional[str] = None
+    venue: Optional[str] = None
+    date: Optional[str] = None
+    status: Optional[str] = None
 
 class MatchOut(MatchBase):
     id: int
+    user_id: int
+    completed_by_system: Optional[bool] = False
+    auto_completed_at: Optional[datetime] = None
+    completion_reason: Optional[str] = None
     created_at: datetime
+    updated_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True

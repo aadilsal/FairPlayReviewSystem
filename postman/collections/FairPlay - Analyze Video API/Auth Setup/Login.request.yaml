@@ -1,0 +1,34 @@
+$kind: http-request
+name: Login
+method: POST
+url: '{{baseUrl}}/api/auth/login'
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+      "email": "test@example.com",
+      "password": "testpassword123"
+    }
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      var jsonData = pm.response.json();
+      if (jsonData.data && jsonData.data.access_token) {
+          pm.collectionVariables.set("authToken", jsonData.data.access_token);
+          console.log("Token saved:", jsonData.data.access_token);
+      }
+
+      pm.test("Status code is 200", function () {
+          pm.response.to.have.status(200);
+      });
+
+      pm.test("Response has data.access_token", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data).to.exist;
+          pm.expect(jsonData.data.access_token).to.exist;
+      });

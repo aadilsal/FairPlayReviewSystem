@@ -1,0 +1,28 @@
+$kind: http-request
+name: 'Analyze Video - No Auth Token'
+method: POST
+url: '{{baseUrl}}/api/analyze-video'
+order: 1000
+queryParams:
+  - key: match_id
+    value: '{{matchId}}'
+auth:
+  type: noauth
+body:
+  type: formdata
+  content:
+    - key: video_file
+      type: file
+      src: ''
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 401 or 403", function () {
+          pm.expect(pm.response.code).to.be.oneOf([401, 403]);
+      });
+
+      pm.test("Response JSON has status equal to error", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.status).to.eql("error");
+      });

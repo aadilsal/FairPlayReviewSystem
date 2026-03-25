@@ -10,7 +10,16 @@ supabase/
 │   ├── 00001_create_users_table.sql
 │   ├── 00002_create_matches_table.sql
 │   ├── 00003_create_reviews_table.sql
-│   └── 00004_create_notifications_table.sql
+│   ├── 00004_create_notifications_table.sql
+│   ├── 00005_sync_auth_users.sql
+│   ├── 00006_create_detection_results_table.sql
+│   ├── 00007_update_auth_username_sync.sql
+│   ├── 20260315_add_user_ownership_to_matches.sql
+│   ├── 20260315_align_matches_with_frontend_payload.sql
+│   ├── 20260315_harmonize_schema.sql
+│   ├── 20260315_fix_user_trigger.sql
+│   ├── 20260315_final_sync.sql
+│   └── 20260315_auto_complete_stale_matches_24h.sql
 ├── setup.sql          # Complete database setup (all-in-one)
 ├── seed.sql           # Sample data for testing
 └── README.md          # This file
@@ -37,6 +46,15 @@ Run each migration file in order:
 2. `00002_create_matches_table.sql`
 3. `00003_create_reviews_table.sql`
 4. `00004_create_notifications_table.sql`
+5. `00005_sync_auth_users.sql`
+6. `00006_create_detection_results_table.sql`
+7. `00007_update_auth_username_sync.sql`
+8. `20260315_add_user_ownership_to_matches.sql`
+9. `20260315_align_matches_with_frontend_payload.sql`
+10. `20260315_harmonize_schema.sql`
+11. `20260315_fix_user_trigger.sql`
+12. `20260315_final_sync.sql`
+13. `20260315_auto_complete_stale_matches_24h.sql`
 
 ## 📊 Database Schema
 
@@ -64,8 +82,15 @@ Stores cricket match information.
 - id (BIGSERIAL, PRIMARY KEY)
 - team_a (VARCHAR, NOT NULL)
 - team_b (VARCHAR, NOT NULL)
+- user_id (BIGINT, FOREIGN KEY -> users.id)
+- name (VARCHAR, NULLABLE)
+- teams (VARCHAR, NULLABLE)
+- venue (VARCHAR, NULLABLE)
 - date (TIMESTAMP WITH TIME ZONE, NOT NULL)
 - status (VARCHAR, NOT NULL) -- 'scheduled', 'in_progress', 'completed', 'cancelled', 'postponed'
+- completed_by_system (BOOLEAN, DEFAULT FALSE)
+- auto_completed_at (TIMESTAMP WITH TIME ZONE, NULLABLE)
+- completion_reason (VARCHAR, NULLABLE)
 - created_at (TIMESTAMP WITH TIME ZONE)
 - updated_at (TIMESTAMP WITH TIME ZONE)
 ```
@@ -96,6 +121,47 @@ Stores user notifications.
 - created_at (TIMESTAMP WITH TIME ZONE)
 - updated_at (TIMESTAMP WITH TIME ZONE)
 ```
+
+#### 5. **detection_results**
+
+Stores metadata and artifact paths for full video detection pipeline runs.
+
+```sql
+- id (BIGSERIAL, PRIMARY KEY)
+- match_id (BIGINT, FOREIGN KEY -> matches.id)
+- user_id (BIGINT, FOREIGN KEY -> users.id)
+- input_video_path (TEXT)
+- output_video_path (TEXT)
+- metadata_path (TEXT)
+- summary_stats (JSONB)
+- status (VARCHAR) -- 'processing', 'completed', 'failed'
+- processing_time_ms (INTEGER)
+- error_message (TEXT)
+- created_at (TIMESTAMP WITH TIME ZONE)
+- updated_at (TIMESTAMP WITH TIME ZONE)
+```
+
+#### 6. **notification_settings**
+
+Stores per-user notification preferences.
+
+```sql
+- id (BIGSERIAL, PRIMARY KEY)
+- user_id (BIGINT, FOREIGN KEY -> users.id, UNIQUE)
+- match_alerts (BOOLEAN, DEFAULT TRUE)
+- review_updates (BOOLEAN, DEFAULT TRUE)
+- system_notifications (BOOLEAN, DEFAULT TRUE)
+- updated_at (TIMESTAMP WITH TIME ZONE)
+```
+
+### Auto-complete Function
+
+The migration 20260315_auto_complete_stale_matches_24h.sql adds:
+
+- SQL function: public.auto_complete_stale_matches(timeout_hours, target_user_id)
+- Auto-complete policy: marks stale in-progress matches as completed after timeout
+- Notification inserts for all system-completed matches
+- Optional pg_cron schedule (every 30 minutes) when pg_cron extension is available
 
 ## 🔐 Security Features
 
@@ -139,8 +205,14 @@ Make sure your `.env` file has the correct Supabase credentials:
 
 ```env
 SUPABASE_URL=https://jdefrtfaphntvpavxmhp.supabase.co
-SUPABASE_KEY=sb_publishable_XzYbvyz7ZJSeku_rRuYy-A_QKlC0Y6u
+SUPABASE_KEY=sb_publishable_Xxxxxxxxxxxxxxxxxxxxxxx
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 ```
+
+Notes:
+
+- Use SUPABASE_SERVICE_ROLE_KEY only in backend/server code.
+- Do not expose the service role key in frontend/mobile apps.
 
 ## 📝 Verification
 
