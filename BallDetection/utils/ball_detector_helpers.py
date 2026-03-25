@@ -78,9 +78,12 @@ def handle_tracking_state(detector_instance, frame):
         detector_instance.miss_streak += 1
         logger.warning(f"[TRACKING] Missed ({detector_instance.miss_streak})")
         
+        last_w = detector_instance.last_box[2] if detector_instance.last_box else 20
+        last_h = detector_instance.last_box[3] if detector_instance.last_box else 20
+
         # Create Ghost
         current_ball_info = {
-            'box': [int(pred_x), int(pred_y), 0, 0],
+            'box': [int(pred_x), int(pred_y), last_w, last_h],
             'conf': 0.0,
             'source': 'kalman-ghost',
             'ghost': True

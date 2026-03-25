@@ -3,7 +3,7 @@ import argparse
 import sys
 import os
 
-from wicket_detector import detect_wicket
+from wicket_tracker import detect_wicket
 
 def main():
     # 1. Setup Argument Parser to get video path from terminal
@@ -38,18 +38,8 @@ def main():
         
         frame_count += 1
 
-        # 4. Pass frame to the tracker
-        # The tracker modifies 'processed_frame' in-place (drawing boxes) 
-        # and returns the list of detections.
         processed_frame, detections = detect_wicket(frame, conf=args.conf)
 
-        # Optional: Print bbox details to terminal for debugging
-        if detections:
-            print(f"Frame {frame_count}: Found {len(detections)} objects")
-            for det in detections:
-                print(f"  - {det['label']}: Box {det['box']} | Conf: {det['conf']:.2f}")
-
-        # 5. Display the frame with bounding boxes
         cv2.imshow("Wicket Tracker Output", processed_frame)
 
         # Exit on 'q' key press
