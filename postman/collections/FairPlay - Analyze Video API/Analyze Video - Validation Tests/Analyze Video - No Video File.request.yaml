@@ -1,0 +1,15 @@
+$kind: http-request
+name: 'Analyze Video - No Video File'
+method: POST
+url: '{{baseUrl}}/api/analyze-video'
+order: 3000
+queryParams:
+  - key: match_id
+    value: '{{matchId}}'
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 422", function () {
+          pm.response.to.have.status(422);
+      });

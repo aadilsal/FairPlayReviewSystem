@@ -7,13 +7,23 @@ import scipy.interpolate
 
 # 1. IMPORT PREPROCESSING (The missing link)
 try:
-    from preprocessing import preprocess_frame
+    # When running as a package import (e.g. `import BallDetection.ball_detector`)
+    from .preprocessing import preprocess_frame  # type: ignore
 except ImportError:
-    print("[WARN] preprocessing.py not found. Using raw frames.")
-    preprocess_frame = None
+    try:
+        # When running as legacy script with BallDetection/ on sys.path
+        from preprocessing import preprocess_frame  # type: ignore
+    except ImportError:
+        print("[WARN] preprocessing.py not found. Using raw frames.")
+        preprocess_frame = None
 
 # Ensure you have this file or adjust import
-from yolo_detect import YOLOBallDetector 
+try:
+    # Package-safe import
+    from .yolo_detect import YOLOBallDetector  # type: ignore
+except ImportError:
+    # Legacy import style (requires BallDetection/ on sys.path)
+    from yolo_detect import YOLOBallDetector  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -259,7 +269,10 @@ class TrajectoryPostProcessor:
         gap_frames = []
         
         for i, result in enumerate(frame_results):
-            if result['source'] == 'yolo':
+            # Treat "having a valid position" as a valid boundary for gaps.
+            # This makes interpolation work even when ball positions come from
+            # optical flow or physics prediction (not only YOLO detections).
+            if result.get('position') is not None:
                 if in_gap and gap_start is not None:
                     # End of gap
                     gap_end = i - 1
@@ -365,8 +378,14 @@ class TrajectoryPostProcessor:
             # Check context
             start_idx = gap_info['start_frame']
             end_idx = gap_info['end_frame']
-            context_before = [r for r in frame_results[max(0, start_idx-5):start_idx] if r['source'] == 'yolo']
-            context_after = [r for r in frame_results[end_idx+1:min(len(frame_results), end_idx+6)] if r['source'] == 'yolo']
+            context_before = [
+                r for r in frame_results[max(0, start_idx-5):start_idx]
+                if r.get('position') is not None
+            ]
+            context_after = [
+                r for r in frame_results[end_idx+1:min(len(frame_results), end_idx+6)]
+                if r.get('position') is not None
+            ]
             if len(context_before) >= self.config['min_context_frames'] and len(context_after) >= self.config['min_context_frames']:
                 return 'spline'
             else:

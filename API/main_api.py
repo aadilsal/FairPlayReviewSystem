@@ -7,7 +7,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 import time
 import uuid
-from API.routes import auth_routes, match_routes, review_routes, notification_routes, profile_routes, detection_routes, health_routes
+from API.routes import auth_routes, match_routes, review_routes, notification_routes, profile_routes, detection_routes, health_routes, video_proxy_routes
 
 app = FastAPI(
     title="FairPlayReviewSystem API",
@@ -83,6 +83,7 @@ app.include_router(notification_routes.router, prefix="/api/notifications", tags
 app.include_router(profile_routes.router, prefix="/api/profile", tags=["Profile"])
 app.include_router(detection_routes.router, prefix="/api", tags=["Detection"])
 app.include_router(health_routes.router, prefix="/api/health", tags=["Health"])
+app.include_router(video_proxy_routes.router, tags=["Video"])
 
 # Global Exception Handler
 @app.exception_handler(StarletteHTTPException)

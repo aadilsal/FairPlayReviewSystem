@@ -1,0 +1,21 @@
+$kind: http-request
+name: 'Analyze Video - Invalid match_id (string)'
+method: POST
+url: '{{baseUrl}}/api/analyze-video'
+order: 4000
+queryParams:
+  - key: match_id
+    value: 'abc'
+body:
+  type: formdata
+  content:
+    - key: video_file
+      type: file
+      src: ''
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 422", function () {
+          pm.response.to.have.status(422);
+      });

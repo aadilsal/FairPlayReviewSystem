@@ -1,0 +1,24 @@
+$kind: http-request
+name: 'Analyze Video - Invalid Auth Token'
+method: POST
+url: '{{baseUrl}}/api/analyze-video'
+order: 2000
+queryParams:
+  - key: match_id
+    value: '{{matchId}}'
+headers:
+  - key: Authorization
+    value: 'Bearer invalid_token_xyz'
+body:
+  type: formdata
+  content:
+    - key: video_file
+      type: file
+      src: ''
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 401 or 403", function () {
+          pm.expect(pm.response.code).to.be.oneOf([401, 403]);
+      });

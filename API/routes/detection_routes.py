@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Depends
+from fastapi import APIRouter, UploadFile, File, Depends, Form
 import logging
 from API.services.detection_service import DetectionService
 from API.utils.response_formatter import success_response
@@ -11,12 +11,14 @@ logger = logging.getLogger("fairplay.api.detection")
 async def analyze_video(
     match_id: int,
     video_file: UploadFile = File(...),
+    original_decision: str = Form(...),
     person_conf: float = 0.5,
     bat_conf: float = 0.1,
     iou_thresh: float = 0.05,
     consec_frames: int = 3,
     wicket_conf: float = 0.25,
     fps: int = 30,
+    display: bool = True,
     current_user=Depends(get_current_user),
 ):
     logger.info(
@@ -28,6 +30,7 @@ async def analyze_video(
     result = await DetectionService.analyze_video(
         match_id=match_id,
         user_id=current_user["id"],
+        original_decision=original_decision,
         video_file=video_file,
         person_conf=person_conf,
         bat_conf=bat_conf,
@@ -35,6 +38,7 @@ async def analyze_video(
         consec_frames=consec_frames,
         wicket_conf=wicket_conf,
         fps=fps,
+        display=display,
     )
     logger.info("Analyze video completed for match_id=%s", match_id)
     return success_response(data=result.result, message="Video analyzed")

@@ -1,7 +1,15 @@
 from fastapi import UploadFile, HTTPException
 from API.utils.file_handler import save_upload_file, delete_file
 from API.schemas.detection_schemas import DetectionResult
-from API.core.supabase_client import supabase_client, MATCHES_TABLE, DETECTION_RESULTS_TABLE
+from API.core.supabase_client import (
+    supabase_client,
+    supabase_admin_client,
+    MATCHES_TABLE,
+    DETECTION_RESULTS_TABLE,
+)
+from API.services.prediction_service import PredictionService
+from API.schemas.review_schemas import ReviewCreate
+from API.services.review_service import ReviewService
 import sys
 import os
 import uuid
@@ -35,6 +43,35 @@ try:
 except ImportError:
     _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
     DETECTION_PIPELINE_AVAILABLE = False
+
+
+REVIEW_VIDEOS_BUCKET = "review-videos"
+
+
+def _write_client():
+    return supabase_admin_client or supabase_client
+
+
+def _upload_review_video_and_get_object_path(*, local_video_path: Path, user_id: int, match_id: int) -> str:
+    if not local_video_path.exists():
+        raise RuntimeError(f"Output video not found: {local_video_path}")
+
+    object_path = f"reviews/user_{user_id}/match_{match_id}/{local_video_path.stem}_{uuid.uuid4().hex}.mp4"
+    storage = _write_client().storage.from_(REVIEW_VIDEOS_BUCKET)
+
+    payload = local_video_path.read_bytes()
+    if not payload:
+        raise RuntimeError("Output video is empty")
+
+    try:
+        storage.upload(object_path, payload, {"content-type": "video/mp4", "upsert": "true"})
+    except TypeError:
+        storage.upload(object_path, payload)
+    except Exception as exc:
+        raise RuntimeError(f"Video upload failed: {exc}") from exc
+
+    # For private buckets we'll store the object path and create signed URLs at read time.
+    return object_path
 
 
 def _aggregate_frame_metadata(frames_dir: Path) -> tuple[dict, str]:
@@ -84,6 +121,7 @@ class DetectionService:
     async def analyze_video(
         match_id: int,
         user_id: int,
+        original_decision: str | None,
         video_file: UploadFile,
         person_conf: float = 0.5,
         bat_conf: float = 0.1,
@@ -91,6 +129,7 @@ class DetectionService:
         consec_frames: int = 3,
         wicket_conf: float = 0.25,
         fps: int = 30,
+        display: bool = True,
     ):
         if not DETECTION_PIPELINE_AVAILABLE:
             raise HTTPException(status_code=500, detail="Detection pipeline not available")
@@ -135,7 +174,7 @@ class DetectionService:
                 iou_thresh=iou_thresh,
                 consec_required=consec_frames,
                 wicket_conf=wicket_conf,
-                display=False,
+                display=display,
             )
 
             output_video_path = frames_dir / f"{video_name}_output.mp4"
@@ -144,16 +183,13 @@ class DetectionService:
             summary_stats, merged_metadata_path = _aggregate_frame_metadata(frames_dir)
             processing_time_ms = int((time.perf_counter() - started_at) * 1000)
 
-            # Bridge to frontend DRS expectations (api.types.ts -> AnalyzeVideoResponse)
-            is_wicket = summary_stats.get("frames_with_wicket", 0) > 0
-            is_ball = summary_stats.get("frames_with_ball", 0) > 0
-            
-            # Simple heuristic for compatibility layer
-            impact = "In-line" if is_ball else "Outside"
-            pitch = "In-line" if is_ball else "Outside"
-            wickets = "Hitting" if is_wicket else "Missing"
-            decision = "OUT" if (is_wicket and is_ball) else "NOT OUT"
-            confidence = 0.85 if is_wicket else 0.45
+            # Trajectory prediction -> DRS-compatible fields.
+            prediction = PredictionService.predict_from_frames(frames_dir)
+            impact = prediction["impact"]
+            pitch = prediction["pitch"]
+            wickets = prediction["wickets"]
+            decision = prediction["decision"]
+            confidence = prediction["confidence"]
 
             result_payload = {
                 "match_id": match_id,
@@ -165,13 +201,56 @@ class DetectionService:
                 "frames_dir": str(frames_dir),
                 "metadata_path": merged_metadata_path,
                 "summary_stats": summary_stats,
+                # Extra debugging/inspection fields (safe for frontend).
+                "trajectory_prediction": prediction,
                 # Frontend specific fields (AnalyzeVideoResponse)
                 "impact": impact,
                 "pitch": pitch,
                 "wickets": wickets,
                 "decision": decision,
-                "confidence": confidence
+                "confidence": confidence,
             }
+            if original_decision is not None:
+                result_payload["original_decision"] = original_decision
+
+            # Upload output video to Supabase Storage (store object path; signed URLs are generated when fetching reviews).
+            output_video_object_path = None
+            output_video_upload_error = None
+            try:
+                output_video_object_path = _upload_review_video_and_get_object_path(
+                    local_video_path=Path(output_video_path),
+                    user_id=user_id,
+                    match_id=match_id,
+                )
+                result_payload["output_video_object_path"] = output_video_object_path
+            except Exception as e:
+                output_video_upload_error = str(e)
+                result_payload["output_video_upload_error"] = output_video_upload_error
+
+            # Persist a user-visible "review" record for later viewing.
+            saved_review = None
+            review_save_error = None
+            try:
+                review_create = ReviewCreate(
+                    match_id=match_id,
+                    original_decision=original_decision,
+                    decision=decision,
+                    impact=impact,
+                    pitch=pitch,
+                    wickets=wickets,
+                    video_uri=output_video_object_path or str(output_video_path),
+                    content=merged_metadata_path,
+                    analysis=json.dumps(prediction),
+                )
+                saved_review = await ReviewService.create_review(review_create, user_id)
+            except Exception as e:
+                # Don't discard the analysis output if review persistence fails.
+                review_save_error = str(e)
+
+            result_payload["review_saved"] = bool(saved_review)
+            result_payload["review"] = saved_review
+            if review_save_error:
+                result_payload["review_save_error"] = review_save_error
 
             if record:
                 supabase_client.table(DETECTION_RESULTS_TABLE).update({
