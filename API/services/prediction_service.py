@@ -6,9 +6,6 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from BallDetection.ball_detector import TrajectoryPostProcessor
-
-
 _FRAME_FILE_RE = re.compile(r"frame_(\d+)\.json$", re.IGNORECASE)
 
 
@@ -19,6 +16,54 @@ def _clamp01(x: float) -> float:
 def _point_in_box(px: float, py: float, box: List[float], margin: float = 10.0) -> bool:
     x, y, w, h = box
     return (x - margin) <= px <= (x + w + margin) and (y - margin) <= py <= (y + h + margin)
+
+
+class TrajectoryPostProcessor:
+    """
+    Backward-compatible lightweight trajectory smoother used by API prediction.
+    Fills missing ball positions with linear interpolation/extrapolation.
+    """
+
+    @staticmethod
+    def process_trajectory(track: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not track:
+            return []
+
+        corrected = [dict(item) for item in track]
+        known_indices = [i for i, item in enumerate(corrected) if item.get("position") is not None]
+        if not known_indices:
+            return corrected
+
+        first_known = known_indices[0]
+        last_known = known_indices[-1]
+
+        # Fill leading missing positions with first known point.
+        for i in range(0, first_known):
+            corrected[i]["position"] = corrected[first_known]["position"]
+            corrected[i]["source"] = "interpolated_leading"
+
+        # Fill trailing missing positions with last known point.
+        for i in range(last_known + 1, len(corrected)):
+            corrected[i]["position"] = corrected[last_known]["position"]
+            corrected[i]["source"] = "interpolated_trailing"
+
+        # Fill gaps between known detections linearly.
+        for left, right in zip(known_indices, known_indices[1:]):
+            gap = right - left
+            if gap <= 1:
+                continue
+
+            lx, ly = corrected[left]["position"]
+            rx, ry = corrected[right]["position"]
+            for j in range(1, gap):
+                t = j / float(gap)
+                x = (1.0 - t) * float(lx) + t * float(rx)
+                y = (1.0 - t) * float(ly) + t * float(ry)
+                idx = left + j
+                corrected[idx]["position"] = (x, y)
+                corrected[idx]["source"] = "interpolated_linear"
+
+        return corrected
 
 
 class PredictionService:
