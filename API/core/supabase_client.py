@@ -21,6 +21,7 @@ REVIEWS_TABLE = "reviews"
 NOTIFICATIONS_TABLE = "notifications"
 NOTIFICATION_SETTINGS_TABLE = "notification_settings"
 DETECTION_RESULTS_TABLE = "detection_results"
+WICKET_CONFIGURATIONS_TABLE = "wicket_configurations"
 
 # Helper functions for common operations
 async def insert_record(table: str, data: dict):

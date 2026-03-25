@@ -29,7 +29,8 @@ def process_frames_pipeline(
     iou_thresh=0.05,
     consec_required=3,
     wicket_conf=0.25,
-    display=True
+    display=True,
+    wicket_override=None,
 ):
     # Initialize Batsman Logic
     batsman_finder = BatsmanFinder(
@@ -72,9 +73,13 @@ def process_frames_pipeline(
             metadata["detections"].append({"label": "Ball", "data": det_ball})
 
         # B. Wicket Detection
-        _, det_wickets = detect_wicket(clean_frame.copy(), conf=wicket_conf)
-        if det_wickets:
+        if wicket_override:
+            det_wickets = wicket_override
             metadata["detections"].extend(det_wickets)
+        else:
+            _, det_wickets = detect_wicket(clean_frame.copy(), conf=wicket_conf)
+            if det_wickets:
+                metadata["detections"].extend(det_wickets)
         
         # C. Bat Detection
         _, det_bats = detect_bat(clean_frame.copy(), conf=bat_conf)

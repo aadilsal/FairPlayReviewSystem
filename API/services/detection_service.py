@@ -10,6 +10,7 @@ from API.core.supabase_client import (
 from API.services.prediction_service import PredictionService
 from API.schemas.review_schemas import ReviewCreate
 from API.services.review_service import ReviewService
+from API.services.wicket_config_service import WicketConfigService
 import sys
 import os
 import uuid
@@ -118,6 +119,26 @@ def _aggregate_frame_metadata(frames_dir: Path) -> tuple[dict, str]:
 
 class DetectionService:
     @staticmethod
+    def _build_wicket_override(match_id: int, user_id: int):
+        try:
+            cfg = WicketConfigService.get_config(match_id, user_id)
+        except HTTPException:
+            # If match doesn't exist or is not owned, allow normal error path later.
+            return None
+        if not cfg:
+            return None
+        if not cfg.get("configured"):
+            return None
+        near_box = cfg.get("near_box")
+        far_box = cfg.get("far_box")
+        if not near_box or not far_box:
+            return None
+        return [
+            {"label": "Wicket_Near", "box": near_box, "conf": 1.0, "source": "configured"},
+            {"label": "Wicket_Far", "box": far_box, "conf": 1.0, "source": "configured"},
+        ]
+
+    @staticmethod
     async def analyze_video(
         match_id: int,
         user_id: int,
@@ -167,6 +188,8 @@ class DetectionService:
             if not frame_paths:
                 raise RuntimeError("No frames extracted from uploaded video")
 
+            wicket_override = DetectionService._build_wicket_override(match_id, user_id)
+
             process_frames_pipeline(
                 frame_paths,
                 person_conf=person_conf,
@@ -175,6 +198,7 @@ class DetectionService:
                 consec_required=consec_frames,
                 wicket_conf=wicket_conf,
                 display=display,
+                wicket_override=wicket_override,
             )
 
             output_video_path = frames_dir / f"{video_name}_output.mp4"

@@ -229,12 +229,21 @@ class MatchService:
                 raise HTTPException(status_code=404, detail="Match not found")
 
             match_row = check.data[0]
+            # Backend resilience: if client starts a match early and immediately begins sending heartbeat,
+            # promote scheduled -> in_progress so the match persists as live across logouts.
+            patch: dict = {"updated_at": datetime.utcnow().isoformat()}
             if match_row.get("status") != "in_progress":
-                raise HTTPException(status_code=400, detail="Heartbeat is only valid for in_progress matches")
+                patch["status"] = "in_progress"
+                patch.update(_status_metadata_patch("in_progress"))
 
-            response = supabase_client.table(MATCHES_TABLE).update({"updated_at": datetime.utcnow().isoformat()}).eq("id", match_id).eq("user_id", user_id).execute()
+            response = supabase_client.table(MATCHES_TABLE).update(patch).eq("id", match_id).eq("user_id", user_id).execute()
             if response.data:
-                logger.info("[touch_match_activity] Heartbeat recorded for match_id=%s user_id=%s", match_id, user_id)
+                logger.info(
+                    "[touch_match_activity] Heartbeat recorded for match_id=%s user_id=%s status=%s",
+                    match_id,
+                    user_id,
+                    response.data[0].get("status"),
+                )
                 return response.data[0]
 
             raise HTTPException(status_code=500, detail="Failed to record match heartbeat")

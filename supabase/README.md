@@ -205,7 +205,7 @@ Make sure your `.env` file has the correct Supabase credentials:
 
 ```env
 SUPABASE_URL=https://jdefrtfaphntvpavxmhp.supabase.co
-SUPABASE_KEY=sb_publishable_XzYbvyz7ZJSeku_rRuYy-A_QKlC0Y6u
+SUPABASE_KEY=sb_publishable_Xxxxxxxxxxxxxxxxxxxxxxx
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 ```
 
