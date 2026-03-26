@@ -210,7 +210,9 @@ class WicketConfigService:
                 user_id=user_id,
                 near_box=near_box,
                 far_box=far_box,
-                configured=bool(near_box and far_box),
+                # Config is considered valid if we found FAR wickets.
+                # Near can be missing and still be considered "configured".
+                configured=bool(far_box),
             )
 
             # Attach annotated reference (best-effort)

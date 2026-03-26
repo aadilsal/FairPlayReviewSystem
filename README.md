@@ -81,6 +81,32 @@ Open interactive API docs at:
 
 - http://localhost:8000/docs
 
+### Key API Endpoints (Latest)
+
+- **Analyze video**
+  - **POST** `/api/analyze-video?match_id=<id>`
+  - **Body**: `multipart/form-data`
+    - `video_file`: file (required)
+    - `original_decision`: string (required)
+  - **Query params (optional)**:
+    - `person_conf` (default `0.5`)
+    - `bat_conf` (default `0.1`)
+    - `pad_conf` (default `0.1`)
+    - `iou_thresh` (default `0.05`)
+    - `consec_frames` (default `3`)
+    - `wicket_conf` (default `0.25`)
+    - `preprocess` (default `true`)
+    - `fps` (default `30`)
+    - `display` (default `true`)
+
+- **Wicket configuration**
+  - **GET** `/api/matches/{match_id}/wicket-config`
+  - **POST** `/api/matches/{match_id}/wicket-config/auto` (multipart upload; runs in background)
+  - **PUT** `/api/matches/{match_id}/wicket-config` (manual override)
+  - **Configured semantics (latest)**:
+    - `configured = true` **iff** `far_box` is present
+    - `near_box` may be missing and the config can still be considered configured
+
 ### Match Status Behavior
 
 - Allowed statuses: scheduled, in_progress, completed, cancelled, postponed
@@ -95,13 +121,13 @@ Open interactive API docs at:
 ### Ball Detection Only
 
 ```python
-from BallDetection.ball_detector import detect_ball_on_frame
+from BallDetection.pipeline.ball_detector import detect_ball
 import cv2
 
 frame = cv2.imread('frame.jpg')
-_, ball_info = detect_ball_on_frame(frame, frame_idx=0)
+ball_info = detect_ball(frame=frame, frame_idx=0)
 if ball_info:
-    print(f"Ball detected: {ball_info}")
+    print("Ball detected:", ball_info)
 ```
 
 ## Project Structure
@@ -170,10 +196,8 @@ ball_info = {
 ### Post-processing
 
 ```python
-from BallDetection.ball_detector import TrajectoryPostProcessor
-
-post_processor = TrajectoryPostProcessor()
-corrected_results = post_processor.process_trajectory(frame_results)
+# Post-processing / trajectory smoothing is implemented in the BallDetection pipeline layer.
+# See `BallDetection/pipeline/post_processor.py` for the main post-processing orchestration.
 ```
 
 ## CLI Usage
@@ -273,32 +297,25 @@ cricket_ball_data/
 ### Custom Ball Detection
 
 ```python
-from BallDetection.ball_detector import detect_ball_on_frame, TrajectoryPostProcessor
+from BallDetection.pipeline.ball_detector import detect_ball
 
 # Process frames
 frame_results = []
 for idx, frame in enumerate(video_frames):
-    _, ball_info = detect_ball_on_frame(frame, frame_idx=idx)
+    ball_info = detect_ball(frame=frame, frame_idx=idx)
     frame_results.append({
         'frame_idx': idx,
         'position': ball_info['box'][:2] if ball_info else None,
         'conf': ball_info['conf'] if ball_info else 0.0,
         'source': ball_info['source'] if ball_info else 'none'
     })
-
-# Post-process for gap filling
-post_processor = TrajectoryPostProcessor()
-corrected_results = post_processor.process_trajectory(frame_results)
 ```
 
 ### Visualization
 
 ```python
-post_processor.visualize_corrections(
-    frame_results,
-    corrected_results,
-    "trajectory_correction.png"
-)
+# See `utils/visualizer.py` and `BallDetection/utils/ball_debug_visualizer.py` for
+# rendering/debug visualization utilities.
 ```
 
 ## Troubleshooting

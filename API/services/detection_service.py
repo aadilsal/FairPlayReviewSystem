@@ -131,12 +131,13 @@ class DetectionService:
             return None
         near_box = cfg.get("near_box")
         far_box = cfg.get("far_box")
-        if not near_box or not far_box:
+        # Configured is driven by FAR wicket presence; near is optional.
+        if not far_box:
             return None
-        return [
-            {"label": "Wicket_Near", "box": near_box, "conf": 1.0, "source": "configured"},
-            {"label": "Wicket_Far", "box": far_box, "conf": 1.0, "source": "configured"},
-        ]
+        override = [{"label": "Wicket_Far", "box": far_box, "conf": 1.0, "source": "configured"}]
+        if near_box:
+            override.insert(0, {"label": "Wicket_Near", "box": near_box, "conf": 1.0, "source": "configured"})
+        return override
 
     @staticmethod
     async def analyze_video(
@@ -146,9 +147,11 @@ class DetectionService:
         video_file: UploadFile,
         person_conf: float = 0.5,
         bat_conf: float = 0.1,
+        pad_conf: float = 0.1,
         iou_thresh: float = 0.05,
         consec_frames: int = 3,
         wicket_conf: float = 0.25,
+        preprocess: bool = True,
         fps: int = 30,
         display: bool = True,
     ):
@@ -194,9 +197,11 @@ class DetectionService:
                 frame_paths,
                 person_conf=person_conf,
                 bat_conf=bat_conf,
+                pad_conf=pad_conf,
                 iou_thresh=iou_thresh,
                 consec_required=consec_frames,
                 wicket_conf=wicket_conf,
+                preprocess=preprocess,
                 display=display,
                 wicket_override=wicket_override,
             )
