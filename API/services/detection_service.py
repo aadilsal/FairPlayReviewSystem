@@ -16,6 +16,7 @@ import os
 import uuid
 import time
 import json
+import base64
 from pathlib import Path
 
 
@@ -37,7 +38,7 @@ def _bootstrap_pipeline_import_paths() -> str:
 # Safely import detection pipeline
 try:
     _PROJECT_ROOT = _bootstrap_pipeline_import_paths()
-    from detection_pipeline import process_frames_pipeline
+    from detection_pipeline import process_frames_pipeline, _safe_video_stem
     from utils.frame_extractor import extract_video_frames
     from utils.video_utils import frames_to_video_with_custom_path
     DETECTION_PIPELINE_AVAILABLE = True
@@ -47,6 +48,7 @@ except ImportError:
 
 
 REVIEW_VIDEOS_BUCKET = "review-videos"
+REVIEW_STORAGE_SIGNED_URL_SECONDS = 60 * 60  # same TTL as video_proxy / reviews
 
 
 def _write_client():
@@ -73,6 +75,38 @@ def _upload_review_video_and_get_object_path(*, local_video_path: Path, user_id:
 
     # For private buckets we'll store the object path and create signed URLs at read time.
     return object_path
+
+
+def _upload_lbw_review_card_jpeg(*, local_path: Path, user_id: int, match_id: int) -> str:
+    if not local_path.is_file():
+        raise RuntimeError(f"LBW review card not found: {local_path}")
+
+    object_path = (
+        f"reviews/user_{user_id}/match_{match_id}/lbw_review_card_{uuid.uuid4().hex}.jpg"
+    )
+    storage = _write_client().storage.from_(REVIEW_VIDEOS_BUCKET)
+    payload = local_path.read_bytes()
+    if not payload:
+        raise RuntimeError("LBW review card file is empty")
+
+    try:
+        storage.upload(
+            object_path,
+            payload,
+            {"content-type": "image/jpeg", "upsert": "true"},
+        )
+    except TypeError:
+        storage.upload(object_path, payload)
+    except Exception as exc:
+        raise RuntimeError(f"LBW review card upload failed: {exc}") from exc
+
+    return object_path
+
+
+def _sign_review_storage_object(object_path: str) -> str:
+    storage = _write_client().storage.from_(REVIEW_VIDEOS_BUCKET)
+    signed = storage.create_signed_url(object_path, REVIEW_STORAGE_SIGNED_URL_SECONDS)
+    return ReviewService._resolve_signed_url(signed)
 
 
 def _aggregate_frame_metadata(frames_dir: Path) -> tuple[dict, str]:
@@ -116,6 +150,26 @@ def _aggregate_frame_metadata(frames_dir: Path) -> tuple[dict, str]:
         json.dump(merged, f, indent=2)
 
     return summary, str(merged_path)
+
+
+def _lbw_review_card_path(frames_dir: Path) -> Path:
+    """Same naming as detection_pipeline LBW card output."""
+    run_tag = _safe_video_stem(frames_dir.resolve().name)
+    return frames_dir / f"lbw_review_card_{run_tag}.jpg"
+
+
+def _read_jpeg_as_data_url(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    b64 = base64.standard_b64encode(raw).decode("ascii")
+    return f"data:image/jpeg;base64,{b64}"
+
 
 class DetectionService:
     @staticmethod
@@ -204,6 +258,7 @@ class DetectionService:
                 preprocess=preprocess,
                 display=display,
                 wicket_override=wicket_override,
+                video_stem=video_name,
             )
 
             output_video_path = frames_dir / f"{video_name}_output.mp4"
@@ -242,6 +297,15 @@ class DetectionService:
             if original_decision is not None:
                 result_payload["original_decision"] = original_decision
 
+            card_path = _lbw_review_card_path(frames_dir)
+            card_data_url = _read_jpeg_as_data_url(card_path)
+            result_payload["lbw_review_card_image"] = card_data_url
+            result_payload["lbw_review_card_filename"] = (
+                card_path.name if card_data_url else None
+            )
+            result_payload["lbw_review_card_object_path"] = None
+            result_payload["lbw_review_card_url"] = None
+
             # Upload output video to Supabase Storage (store object path; signed URLs are generated when fetching reviews).
             output_video_object_path = None
             output_video_upload_error = None
@@ -256,6 +320,20 @@ class DetectionService:
                 output_video_upload_error = str(e)
                 result_payload["output_video_upload_error"] = output_video_upload_error
 
+            if card_path.is_file():
+                try:
+                    card_object_path = _upload_lbw_review_card_jpeg(
+                        local_path=card_path,
+                        user_id=user_id,
+                        match_id=match_id,
+                    )
+                    result_payload["lbw_review_card_object_path"] = card_object_path
+                    signed_card = _sign_review_storage_object(card_object_path)
+                    if signed_card:
+                        result_payload["lbw_review_card_url"] = signed_card
+                except Exception as e:
+                    result_payload["lbw_review_card_upload_error"] = str(e)
+
             # Persist a user-visible "review" record for later viewing.
             saved_review = None
             review_save_error = None
@@ -268,6 +346,7 @@ class DetectionService:
                     pitch=pitch,
                     wickets=wickets,
                     video_uri=output_video_object_path or str(output_video_path),
+                    lbw_review_card_uri=result_payload.get("lbw_review_card_object_path"),
                     content=merged_metadata_path,
                     analysis=json.dumps(prediction),
                 )
@@ -282,13 +361,22 @@ class DetectionService:
                 result_payload["review_save_error"] = review_save_error
 
             if record:
+                result_for_db = dict(result_payload)
+                # Avoid storing multi‑MB base64 blobs in JSON columns.
+                if "lbw_review_card_image" in result_for_db:
+                    result_for_db["lbw_review_card_image"] = None
+                    result_for_db["lbw_review_card_image_omitted"] = bool(
+                        result_payload.get("lbw_review_card_image")
+                    )
+                # Signed URLs expire; keep only the storage object path in JSON.
+                result_for_db.pop("lbw_review_card_url", None)
                 supabase_client.table(DETECTION_RESULTS_TABLE).update({
                     "status": "completed",
                     "output_video_path": str(output_video_path),
                     "metadata_path": merged_metadata_path,
                     "summary_stats": summary_stats,
                     "processing_time_ms": processing_time_ms,
-                    "result_data": result_payload # Persist the full DRS payload for deep sync
+                    "result_data": result_for_db,
                 }).eq("id", record["id"]).execute()
 
             return DetectionResult(result=result_payload)

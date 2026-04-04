@@ -177,15 +177,153 @@ def visualize_pose(det_pose, vis_frame):
             if kx > 0 and ky > 0:
                 cv2.circle(vis_frame, (kx, ky), 3, (0, 255, 255), -1)
 
-def visualize_frame(frame, det_ball, det_persons, det_batsman_box, det_wickets, det_bats, det_pads, det_pose, frame_idx):
+def _draw_dashed_polyline(img, pts, color, thickness=2, dash_length=10, gap_length=6):
+    if len(pts) < 2:
+        return
+    for i in range(len(pts) - 1):
+        p1 = np.array(pts[i], dtype=np.float32)
+        p2 = np.array(pts[i + 1], dtype=np.float32)
+        seg_len = float(np.linalg.norm(p2 - p1)) + 1e-6
+        u = (p2 - p1) / seg_len
+        dist = 0.0
+        draw = True
+        while dist < seg_len:
+            step = min(dash_length if draw else gap_length, seg_len - dist)
+            a = p1 + u * dist
+            dist += step
+            if draw:
+                b = p1 + u * min(dist, seg_len)
+                cv2.line(
+                    img,
+                    (int(round(a[0])), int(round(a[1]))),
+                    (int(round(b[0])), int(round(b[1]))),
+                    color,
+                    thickness,
+                    cv2.LINE_AA,
+                )
+            draw = not draw
+
+
+def visualize_lbw_overlay(vis_frame, lbw_overlay, frame_idx):
+    if not lbw_overlay:
+        return
+
+    wl = lbw_overlay.get("wicket_line")
+    if wl and len(wl) == 2:
+        p0 = tuple(map(int, wl[0]))
+        p1 = tuple(map(int, wl[1]))
+        cv2.line(vis_frame, p0, p1, (200, 200, 255), 2, cv2.LINE_AA)
+        cv2.putText(
+            vis_frame,
+            "Wicket line",
+            (p1[0] + 6, p1[1]),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (200, 200, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
+    fitted = lbw_overlay.get("fitted_polyline") or []
+    if len(fitted) > 1:
+        arr = np.array([(int(x), int(y)) for x, y in fitted], dtype=np.int32)
+        cv2.polylines(vis_frame, [arr], False, (255, 220, 100), 2, cv2.LINE_AA)
+
+    ext = lbw_overlay.get("predicted_extension") or []
+    if len(ext) > 1:
+        _draw_dashed_polyline(vis_frame, ext, (255, 100, 255), thickness=2)
+
+    pp = lbw_overlay.get("pitch_point")
+    if pp is not None:
+        c = (int(pp[0]), int(pp[1]))
+        cv2.circle(vis_frame, c, 8, (0, 255, 255), 2)
+        cv2.putText(
+            vis_frame,
+            "Pitch",
+            (c[0] + 10, c[1]),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+    ip = lbw_overlay.get("impact_point")
+    if ip is not None:
+        c = (int(ip[0]), int(ip[1]))
+        cv2.circle(vis_frame, c, 8, (0, 165, 255), 2)
+        cv2.putText(
+            vis_frame,
+            "Impact",
+            (c[0] + 10, c[1] + 14),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 165, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+    sp = lbw_overlay.get("stump_intersection")
+    if sp is not None:
+        c = (int(sp[0]), int(sp[1]))
+        cv2.circle(vis_frame, c, 10, (100, 255, 100), 2)
+        cv2.putText(
+            vis_frame,
+            "Stumps",
+            (c[0] + 12, c[1] - 8),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (100, 255, 100),
+            2,
+            cv2.LINE_AA,
+        )
+
+    y0 = 52
+    lines = [
+        f"Pitch inline: {'Y' if lbw_overlay.get('pitch_inline') else 'N'}",
+        f"Impact inline: {'Y' if lbw_overlay.get('impact_inline') else 'N'}",
+        f"Wickets: {'Hitting' if lbw_overlay.get('wickets_hitting') else 'Missing'}",
+        f"Decision: {lbw_overlay.get('decision', 'N/A')}",
+    ]
+    rsn = lbw_overlay.get("reason")
+    if rsn:
+        lines.append(str(rsn))
+    for i, line in enumerate(lines):
+        y = y0 + i * 22
+        cv2.putText(
+            vis_frame,
+            line,
+            (10, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+
+def visualize_frame(
+    frame,
+    det_ball,
+    det_persons,
+    det_batsman_box,
+    det_wickets,
+    det_bats,
+    det_pads,
+    det_pose,
+    frame_idx,
+    lbw_overlay=None,
+):
     vis_frame = frame
 
-    visualize_ball(det_ball, vis_frame, frame_idx) 
+    visualize_ball(det_ball, vis_frame, frame_idx)
     visualize_bat(det_bats, vis_frame)
     visualize_batsman(det_batsman_box, det_persons, vis_frame)
     visualize_wicket(det_wickets, vis_frame)
     visualize_pose(det_pose, vis_frame)
     visualize_pads(det_pads, vis_frame)
+
+    visualize_lbw_overlay(vis_frame, lbw_overlay, frame_idx)
 
     _draw_frame_info(vis_frame, frame_idx)
 

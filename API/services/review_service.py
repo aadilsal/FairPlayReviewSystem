@@ -12,7 +12,7 @@ logger = logging.getLogger("fairplay.api.reviews")
 class ReviewService:
     _SELECT_FIELDS = (
         "id, match_id, user_id, match_name, over, original_decision, decision, impact, pitch, wickets, "
-        "video_uri, content, analysis, created_at, updated_at"
+        "video_uri, lbw_review_card_uri, content, analysis, created_at, updated_at"
     )
 
     @staticmethod
@@ -93,6 +93,40 @@ class ReviewService:
             review["video_url"] = ReviewService._resolve_signed_url(signed)
         except Exception as exc:
             logger.warning("[signed_video_url] Failed for video_uri=%r | %s", video_uri, exc)
+        return ReviewService._attach_signed_lbw_review_card_url(review)
+
+    @staticmethod
+    def _attach_signed_lbw_review_card_url(review: dict) -> dict:
+        """
+        Same pattern as video: keep `lbw_review_card_uri` as storage object path;
+        add `lbw_review_card_url` as a time-limited signed URL when possible.
+        """
+        if not isinstance(review, dict):
+            return review
+
+        raw_card = (review.get("lbw_review_card_uri") or "").strip()
+        if not raw_card:
+            return review
+
+        object_path = raw_card
+        if raw_card.lower().startswith("http://") or raw_card.lower().startswith("https://"):
+            extracted = ReviewService._extract_object_path_from_storage_url(raw_card)
+            if extracted:
+                object_path = extracted
+            else:
+                review["lbw_review_card_url"] = raw_card
+                return review
+
+        try:
+            storage = ReviewService._write_client().storage.from_(REVIEW_VIDEOS_BUCKET)
+            signed = storage.create_signed_url(object_path, SIGNED_URL_EXPIRES_IN_SECONDS)
+            review["lbw_review_card_url"] = ReviewService._resolve_signed_url(signed)
+        except Exception as exc:
+            logger.warning(
+                "[signed_lbw_card_url] Failed for lbw_review_card_uri=%r | %s",
+                object_path,
+                exc,
+            )
         return review
 
     @staticmethod
@@ -113,7 +147,7 @@ class ReviewService:
             response = supabase_client.table(REVIEWS_TABLE).insert(review_dict).execute()
             if response.data:
                 logger.info("[create_review] Created review id=%s", response.data[0].get("id"))
-                return response.data[0]
+                return ReviewService._attach_signed_video_url(response.data[0])
             logger.error("[create_review] Insert returned empty data | payload=%s", review_dict)
             raise HTTPException(status_code=500, detail="Failed to create review")
         except HTTPException:
@@ -169,7 +203,7 @@ class ReviewService:
             update_data.pop("delivery", None)
             response = supabase_client.table(REVIEWS_TABLE).update(update_data).eq("id", review_id).eq("user_id", user_id).execute()
             if response.data:
-                return response.data[0]
+                return ReviewService._attach_signed_video_url(response.data[0])
             raise HTTPException(status_code=500, detail="Failed to update review")
         except HTTPException as e:
             raise e

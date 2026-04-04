@@ -31,9 +31,8 @@ async def get_review_video(object_path: str):
     """
     Backend-only compatibility endpoint.
 
-    Frontend currently requests /reviews/<...>.mp4 from this API host.
-    Videos actually live in Supabase Storage (private bucket), so we generate a signed URL
-    and redirect the client to Supabase for playback.
+    Frontend may request /reviews/<object_path> for videos (.mp4) or LBW card images (.jpg).
+    Objects live in Supabase Storage (private bucket); we return a short-lived signed URL via redirect.
     """
     safe = (object_path or "").strip().lstrip("/")
     if not safe:

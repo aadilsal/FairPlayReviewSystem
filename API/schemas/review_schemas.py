@@ -14,6 +14,7 @@ class ReviewBase(BaseModel):
     pitch: Optional[str] = None
     wickets: Optional[str] = None
     video_uri: Optional[str] = None
+    lbw_review_card_uri: Optional[str] = None
     content: Optional[str] = None
     analysis: Optional[str] = None
 
@@ -29,6 +30,7 @@ class ReviewUpdate(BaseModel):
     pitch: Optional[str] = None
     wickets: Optional[str] = None
     video_uri: Optional[str] = None
+    lbw_review_card_uri: Optional[str] = None
     content: Optional[str] = None
     analysis: Optional[str] = None
 

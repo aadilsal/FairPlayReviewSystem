@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-import math
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -13,6 +13,15 @@ def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
+def _ensure_project_import_paths() -> Path:
+    root = Path(__file__).resolve().parents[2]
+    for p in (root, root / "utils", root / "BallDetection"):
+        s = str(p)
+        if s not in sys.path:
+            sys.path.insert(0, s)
+    return root
+
+
 def _point_in_box(px: float, py: float, box: List[float], margin: float = 10.0) -> bool:
     x, y, w, h = box
     return (x - margin) <= px <= (x + w + margin) and (y - margin) <= py <= (y + h + margin)
@@ -20,7 +29,7 @@ def _point_in_box(px: float, py: float, box: List[float], margin: float = 10.0) 
 
 class TrajectoryPostProcessor:
     """
-    Backward-compatible lightweight trajectory smoother used by API prediction.
+    Backward-compatible lightweight trajectory smoother.
     Fills missing ball positions with linear interpolation/extrapolation.
     """
 
@@ -37,17 +46,14 @@ class TrajectoryPostProcessor:
         first_known = known_indices[0]
         last_known = known_indices[-1]
 
-        # Fill leading missing positions with first known point.
         for i in range(0, first_known):
             corrected[i]["position"] = corrected[first_known]["position"]
             corrected[i]["source"] = "interpolated_leading"
 
-        # Fill trailing missing positions with last known point.
         for i in range(last_known + 1, len(corrected)):
             corrected[i]["position"] = corrected[last_known]["position"]
             corrected[i]["source"] = "interpolated_trailing"
 
-        # Fill gaps between known detections linearly.
         for left, right in zip(known_indices, known_indices[1:]):
             gap = right - left
             if gap <= 1:
@@ -68,9 +74,8 @@ class TrajectoryPostProcessor:
 
 class PredictionService:
     """
-    Builds a corrected ball trajectory from per-frame metadata, then derives
-    the DRS-compatible fields expected by the frontend:
-    impact, pitch, wickets, decision, confidence.
+    Builds trajectory and geometric LBW analysis from per-frame metadata (same logic
+    as offline detection_pipeline), plus legacy fields for the frontend.
     """
 
     @staticmethod
@@ -97,8 +102,6 @@ class PredictionService:
 
     @staticmethod
     def _extract_ball_track(frame_meta: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        # Input format expected by TrajectoryPostProcessor:
-        # { frame_idx, position, conf, source }
         track: List[Dict[str, Any]] = []
         for meta in frame_meta:
             frame_idx = int(meta.get("frame_index", 0))
@@ -110,12 +113,16 @@ class PredictionService:
                 if d.get("label") != "Ball":
                     continue
                 data = d.get("data") or {}
-                box = data.get("box")
-                if box and len(box) == 4:
-                    x, y, w, h = box
-                    position = (float(x + w / 2.0), float(y + h / 2.0))
-                    conf = float(data.get("conf", conf))
-                    source = str(data.get("source") or source)
+                ip = data.get("interpolated_position")
+                if ip is not None and len(ip) >= 2:
+                    position = (float(ip[0]), float(ip[1]))
+                else:
+                    box = data.get("box")
+                    if box and len(box) == 4:
+                        x, y, w, h = box
+                        position = (float(x + w / 2.0), float(y + h / 2.0))
+                conf = float(data.get("conf", conf))
+                source = str(data.get("source") or source)
                 break
 
             track.append(
@@ -141,82 +148,132 @@ class PredictionService:
         return wickets_per_frame
 
     @staticmethod
+    def _extract_pads_per_frame(frame_meta: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+        out: List[List[Dict[str, Any]]] = []
+        for meta in frame_meta:
+            pads: List[Dict[str, Any]] = []
+            for d in meta.get("detections", []):
+                if d.get("label") == "Pad" and "box" in d:
+                    pads.append(d)
+            out.append(pads)
+        return out
+
+    @staticmethod
+    def _extract_batsman_boxes(frame_meta: List[Dict[str, Any]]) -> List[Optional[List[int]]]:
+        boxes: List[Optional[List[int]]] = []
+        for meta in frame_meta:
+            bb: Optional[List[int]] = None
+            for d in meta.get("detections", []):
+                if d.get("label") == "Batsman" and "box" in d:
+                    bb = [int(x) for x in d["box"]]
+                    break
+            boxes.append(bb)
+        return boxes
+
+    @staticmethod
+    def _ball_infos_from_metadata(frame_meta: List[Dict[str, Any]]) -> List[Optional[Dict[str, Any]]]:
+        infos: List[Optional[Dict[str, Any]]] = []
+        for meta in frame_meta:
+            fi = int(meta.get("frame_index", 0))
+            ball: Optional[Dict[str, Any]] = None
+            for d in meta.get("detections", []):
+                if d.get("label") != "Ball":
+                    continue
+                data = dict(d.get("data") or {})
+                data["frame_idx"] = int(data.get("frame_idx", fi))
+                ip = data.get("interpolated_position")
+                if isinstance(ip, list) and len(ip) >= 2:
+                    data["interpolated_position"] = (float(ip[0]), float(ip[1]))
+                ball = data
+                break
+            infos.append(ball)
+        return infos
+
+    @staticmethod
     def predict_from_frames(frames_dir: Path) -> Dict[str, Any]:
         """
         Returns:
-          {impact, pitch, wickets, decision, confidence, impact_frame_idx}
+          impact, pitch, wickets, decision, confidence, impact_frame_idx,
+          lbw (geometric summary), lbw_overlay (optional visualization payload).
         """
+        _ensure_project_import_paths()
+        from BallDetection.pipeline.trajectory import fit_trajectory
+        from lbw_analyzer import (
+            analyze_lbw_sequence,
+            build_anchors_from_ball_infos,
+            lbw_overlay_for_api,
+        )
+
         frame_meta = PredictionService._load_frames_metadata(frames_dir)
         if not frame_meta:
             raise RuntimeError(f"No frame metadata JSON found in {frames_dir}")
 
-        original_track = PredictionService._extract_ball_track(frame_meta)
-        wickets_per_frame = PredictionService._extract_wickets(frame_meta)
+        frame_meta = sorted(frame_meta, key=lambda m: int(m.get("frame_index", 0)))
 
+        ball_infos = PredictionService._ball_infos_from_metadata(frame_meta)
+        wickets_per_frame = PredictionService._extract_wickets(frame_meta)
+        pads_per_frame = PredictionService._extract_pads_per_frame(frame_meta)
+        batsman_boxes = PredictionService._extract_batsman_boxes(frame_meta)
+
+        anchors = build_anchors_from_ball_infos(ball_infos)
+        trajectory_model = fit_trajectory(anchors)
+        lbw_overlay = analyze_lbw_sequence(
+            ball_infos,
+            trajectory_model,
+            wickets_per_frame,
+            pads_per_frame,
+            batsman_boxes,
+        )
+        api_lbw = lbw_overlay_for_api(lbw_overlay)
+
+        original_track = PredictionService._extract_ball_track(frame_meta)
         post = TrajectoryPostProcessor()
         corrected_track = post.process_trajectory(original_track)
 
-        # Determine first impact by intersection with any wicket bbox.
-        hit = False
-        impact_frame_idx: Optional[int] = None
-
-        impact_ball_point: Optional[Tuple[float, float]] = None
-        impact_wicket_box: Optional[List[float]] = None
-
-        for i, corrected in enumerate(corrected_track):
-            pos = corrected.get("position")
-            if pos is None:
-                continue
-            bx, by = float(pos[0]), float(pos[1])
-
-            for w in wickets_per_frame[i] if i < len(wickets_per_frame) else []:
-                box = w.get("box")
-                if not box or not isinstance(box, list) or len(box) != 4:
-                    continue
-                if _point_in_box(bx, by, box, margin=12.0):
-                    hit = True
-                    impact_frame_idx = int(corrected.get("frame_idx", i))
-                    impact_ball_point = (bx, by)
-                    impact_wicket_box = [float(x) for x in box]
-                    break
-            if hit:
-                break
-
-        wickets = "Hitting" if hit else "Missing"
-        decision = "OUT" if hit else "NOT OUT"
-
-        # In-line / Outside heuristics (2D): compare impact X with wicket center X.
-        impact = "Outside"
-        pitch = "Outside"
-        if impact_ball_point and impact_wicket_box:
-            bx, _ = impact_ball_point
-            wx, wy, ww, wh = impact_wicket_box
-            wicket_center_x = wx + ww / 2.0
-            threshold = max(12.0, ww * 0.2)
-            is_in_line = abs(bx - wicket_center_x) <= threshold
-            impact = "In-line" if is_in_line else "Outside"
-            pitch = "In-line" if is_in_line else "Outside"
-
-        # Confidence: higher if less interpolation happened.
+        interpolated = sum(
+            1 for r in corrected_track if str(r.get("source") or "").startswith("interpolated_")
+        )
         total = max(1, len(corrected_track))
-        interpolated = 0
-        for r in corrected_track:
-            src = str(r.get("source") or "")
-            if src.startswith("interpolated_"):
-                interpolated += 1
-
         reliability = _clamp01(1.0 - (interpolated / float(total)))
-        # If we did hit, bump a bit; if missing, slightly lower.
-        base = 0.35 if hit else 0.25
-        confidence = _clamp01(base + 0.65 * reliability)
+
+        geometric = bool(lbw_overlay.get("geometric_lbw"))
+        missing = bool(lbw_overlay.get("reason"))
+        if missing:
+            base = 0.15
+        else:
+            base = 0.4 if geometric else 0.28
+        confidence = _clamp01(base + 0.6 * reliability)
+
+        impact_frame_idx = lbw_overlay.get("impact_frame_idx")
 
         return {
-            "impact": impact,
-            "pitch": pitch,
-            "wickets": wickets,
-            "decision": decision,
+            "impact": api_lbw["impact"],
+            "pitch": api_lbw["pitch"],
+            "wickets": api_lbw["wickets"],
+            "decision": api_lbw["decision"],
+            "reason": api_lbw.get("reason"),
             "confidence": confidence,
             "impact_frame_idx": impact_frame_idx,
-            "hit": hit,
+            "hit": bool(lbw_overlay.get("wickets_hitting")),
+            "lbw": api_lbw,
+            "geometric_lbw": geometric,
+            "lbw_overlay": {
+                k: lbw_overlay[k]
+                for k in (
+                    "pitch_inline",
+                    "impact_inline",
+                    "wickets_hitting",
+                    "pitch_point",
+                    "impact_point",
+                    "stump_intersection",
+                    "bounce_frame",
+                    "decision",
+                    "geometric_lbw",
+                    "fitted_polyline",
+                    "predicted_extension",
+                    "wicket_line",
+                    "reason",
+                )
+                if k in lbw_overlay
+            },
         }
-
