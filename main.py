@@ -77,7 +77,8 @@ def main():
         consec_required=args.consec_frames,
         wicket_conf=args.wicket_conf,
         preprocess=GLOBAL_CONFIG['enable_preprocessing'],
-        display=GLOBAL_CONFIG['display_frames']
+        display=GLOBAL_CONFIG['display_frames'],
+        video_stem=video_name_stem,
     )
 
     print(f"[INFO] Detection pipeline completed.")
