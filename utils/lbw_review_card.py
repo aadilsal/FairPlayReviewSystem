@@ -48,6 +48,26 @@ def _decision_colors(decision: str) -> Tuple[Tuple[int, int, int], Tuple[int, in
     return ((50, 110, 140), (70, 150, 200))
 
 
+def _fit_point_to_box(
+    px: float,
+    py: float,
+    src_w: int,
+    src_h: int,
+    box_w: int,
+    box_h: int,
+    pad: int = 0,
+) -> Tuple[int, int]:
+    """Map a source-image point into a fitted letterboxed box."""
+    inner_w = max(1, box_w - 2 * pad)
+    inner_h = max(1, box_h - 2 * pad)
+    scale = min(inner_w / float(src_w), inner_h / float(src_h))
+    nw = max(1, int(round(src_w * scale)))
+    nh = max(1, int(round(src_h * scale)))
+    ox = (box_w - nw) // 2
+    oy = (box_h - nh) // 2
+    return int(round(ox + px * scale)), int(round(oy + py * scale))
+
+
 def render_lbw_review_card(
     scene_bgr: np.ndarray,
     api: Dict[str, Any],
@@ -104,6 +124,43 @@ def render_lbw_review_card(
     scene_y0 = header_h + margin
     scene_fit, _, _ = _fit_image_to_box(scene_bgr, scene_box_w, scene_box_h, pad=4)
     canvas[scene_y0 : scene_y0 + scene_box_h, margin : margin + scene_box_w] = scene_fit
+
+    wicket_line = overlay.get("wicket_line") if overlay else None
+    if wicket_line and len(wicket_line) == 2:
+        src_h, src_w = scene_bgr.shape[:2]
+        p0 = _fit_point_to_box(
+            float(wicket_line[0][0]),
+            float(wicket_line[0][1]),
+            src_w,
+            src_h,
+            scene_box_w,
+            scene_box_h,
+            pad=4,
+        )
+        p1 = _fit_point_to_box(
+            float(wicket_line[1][0]),
+            float(wicket_line[1][1]),
+            src_w,
+            src_h,
+            scene_box_w,
+            scene_box_h,
+            pad=4,
+        )
+        p0 = (p0[0] + margin, p0[1] + scene_y0)
+        p1 = (p1[0] + margin, p1[1] + scene_y0)
+        cv2.line(canvas, p0, p1, (220, 220, 255), 4, cv2.LINE_AA)
+        mid = ((p0[0] + p1[0]) // 2, (p0[1] + p1[1]) // 2)
+        cv2.putText(
+            canvas,
+            "Wicket line",
+            (mid[0] + 8, mid[1] - 8),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (220, 220, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
     cv2.rectangle(
         canvas,
         (margin, scene_y0),

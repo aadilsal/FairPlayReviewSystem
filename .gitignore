@@ -67,6 +67,7 @@ test_videos/
 
 # ignore generated frames folder
 outputs/frames/
+outputs/wicket-config/
 
 
 # Model weights and large binaries

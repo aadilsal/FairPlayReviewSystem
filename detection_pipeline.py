@@ -254,7 +254,7 @@ def process_frames_pipeline(
             rec["det_pads"],
             rec["det_pose"],
             fi,
-            lbw_overlay=None,
+            lbw_overlay=lbw_overlay,
         )
 
         cv2.imwrite(frame_path, vis_frame)
