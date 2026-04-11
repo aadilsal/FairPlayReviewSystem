@@ -40,8 +40,8 @@ def resolve_final_lbw_decision(
     if normalized_model:
         return normalized_model, None, normalized_original
 
-    final_decision = normalized_original or fallback
-    return final_decision, "inconclusive", normalized_original
+    # Product rule: any inconclusive model output is surfaced as NOT OUT.
+    return fallback, "inconclusive", normalized_original
 
 
 def sanitize_prediction_decisions(payload: Dict[str, Any], final_decision: LbwDecision) -> Dict[str, Any]:

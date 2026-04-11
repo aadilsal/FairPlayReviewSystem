@@ -12,13 +12,13 @@ def test_normalize_lbw_decision_accepts_binary_values_only():
     assert normalize_lbw_decision("NO_DECISION") is None
 
 
-def test_inconclusive_model_decision_falls_back_to_original_decision():
+def test_inconclusive_model_decision_maps_to_not_out_even_if_original_is_out():
     decision, review_outcome, original = resolve_final_lbw_decision(
         model_decision="NO_DECISION",
         original_decision="OUT",
     )
 
-    assert decision == "OUT"
+    assert decision == "NOT OUT"
     assert original == "OUT"
     assert review_outcome == "inconclusive"
 
