@@ -20,6 +20,43 @@ class ReviewService:
         return supabase_admin_client or supabase_client
 
     @staticmethod
+    def _build_default_content(payload: dict) -> str:
+        """Generate a deterministic fallback summary for NOT NULL reviews.content."""
+        parts = []
+        over = payload.get("over")
+        original_decision = payload.get("original_decision")
+        decision = payload.get("decision")
+        impact = payload.get("impact")
+        pitch = payload.get("pitch")
+        wickets = payload.get("wickets")
+
+        if over not in (None, ""):
+            parts.append(f"Over: {over}")
+        if original_decision:
+            parts.append(f"Original: {original_decision}")
+        if decision:
+            parts.append(f"Decision: {decision}")
+        if impact:
+            parts.append(f"Impact: {impact}")
+        if pitch:
+            parts.append(f"Pitch: {pitch}")
+        if wickets:
+            parts.append(f"Wickets: {wickets}")
+
+        if parts:
+            return " | ".join(parts)
+        return "Review submitted"
+
+    @staticmethod
+    def _ensure_required_insert_fields(payload: dict) -> dict:
+        """Normalize optional frontend payload fields to satisfy DB constraints."""
+        normalized = dict(payload)
+        raw_content = normalized.get("content")
+        content = str(raw_content).strip() if raw_content is not None else ""
+        normalized["content"] = content or ReviewService._build_default_content(normalized)
+        return normalized
+
+    @staticmethod
     def _resolve_signed_url(signed_url_result) -> str:
         """
         supabase-py has returned various shapes over time. Normalize to a plain URL string.
@@ -143,6 +180,8 @@ class ReviewService:
                 if match.data:
                     review_dict["match_name"] = match.data[0]["name"]
                     logger.debug("[create_review] Resolved match_name=%r", review_dict["match_name"])
+
+            review_dict = ReviewService._ensure_required_insert_fields(review_dict)
 
             response = supabase_client.table(REVIEWS_TABLE).insert(review_dict).execute()
             if response.data:

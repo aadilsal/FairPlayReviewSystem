@@ -8,6 +8,7 @@ from API.core.supabase_client import (
     DETECTION_RESULTS_TABLE,
 )
 from API.services.prediction_service import PredictionService
+from API.utils.lbw_decision import resolve_final_lbw_decision, sanitize_prediction_decisions
 from API.schemas.review_schemas import ReviewCreate
 from API.services.review_service import ReviewService
 from API.services.wicket_config_service import WicketConfigService
@@ -18,6 +19,10 @@ import time
 import json
 import base64
 from pathlib import Path
+import logging
+
+
+logger = logging.getLogger("fairplay.api.detection")
 
 
 def _bootstrap_pipeline_import_paths() -> str:
@@ -245,7 +250,22 @@ class DetectionService:
             if not frame_paths:
                 raise RuntimeError("No frames extracted from uploaded video")
 
+            logger.info(
+                "[analyze_video] Extracted %s frames for match_id=%s user_id=%s",
+                len(frame_paths),
+                match_id,
+                user_id,
+            )
+
             wicket_override = DetectionService._build_wicket_override(match_id, user_id)
+
+            pipeline_started = time.perf_counter()
+            logger.info(
+                "[analyze_video] Starting detection pipeline match_id=%s user_id=%s display=%s",
+                match_id,
+                user_id,
+                display,
+            )
 
             process_frames_pipeline(
                 frame_paths,
@@ -261,6 +281,12 @@ class DetectionService:
                 video_stem=video_name,
             )
 
+            logger.info(
+                "[analyze_video] Detection pipeline finished in %.2fs for match_id=%s",
+                time.perf_counter() - pipeline_started,
+                match_id,
+            )
+
             output_video_path = frames_dir / f"{video_name}_output.mp4"
             frames_to_video_with_custom_path(str(frames_dir), str(output_video_path), fps)
 
@@ -272,7 +298,12 @@ class DetectionService:
             impact = prediction["impact"]
             pitch = prediction["pitch"]
             wickets = prediction["wickets"]
-            decision = prediction["decision"]
+            raw_decision = prediction["decision"]
+            decision, review_outcome, normalized_original_decision = resolve_final_lbw_decision(
+                raw_decision,
+                original_decision,
+            )
+            prediction = sanitize_prediction_decisions(prediction, decision)
             confidence = prediction["confidence"]
 
             result_payload = {
@@ -294,8 +325,10 @@ class DetectionService:
                 "decision": decision,
                 "confidence": confidence,
             }
-            if original_decision is not None:
-                result_payload["original_decision"] = original_decision
+            if normalized_original_decision is not None:
+                result_payload["original_decision"] = normalized_original_decision
+            if review_outcome:
+                result_payload["review_outcome"] = review_outcome
 
             card_path = _lbw_review_card_path(frames_dir)
             card_data_url = _read_jpeg_as_data_url(card_path)
@@ -340,7 +373,7 @@ class DetectionService:
             try:
                 review_create = ReviewCreate(
                     match_id=match_id,
-                    original_decision=original_decision,
+                    original_decision=normalized_original_decision,
                     decision=decision,
                     impact=impact,
                     pitch=pitch,

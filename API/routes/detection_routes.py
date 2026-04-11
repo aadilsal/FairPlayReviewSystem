@@ -1,17 +1,19 @@
 from fastapi import APIRouter, UploadFile, File, Depends, Form
+from typing import Literal
 import logging
 from API.services.detection_service import DetectionService
 from API.utils.response_formatter import success_response
 from API.dependencies.auth_dependency import get_current_user
+from API.schemas.detection_schemas import AnalyzeVideoResult, AnalyzeVideoSuccessResponse
 
 router = APIRouter()
 logger = logging.getLogger("fairplay.api.detection")
 
-@router.post("/analyze-video")
+@router.post("/analyze-video", response_model=AnalyzeVideoSuccessResponse)
 async def analyze_video(
     match_id: int,
     video_file: UploadFile = File(...),
-    original_decision: str = Form(...),
+    original_decision: Literal["OUT", "NOT OUT"] = Form(...),
     person_conf: float = 0.5,
     bat_conf: float = 0.1,
     pad_conf: float = 0.1,
@@ -19,8 +21,8 @@ async def analyze_video(
     consec_frames: int = 3,
     wicket_conf: float = 0.25,
     preprocess: bool = True,
-    fps: int = 30,
-    display: bool = True,
+    fps: int = 15,
+    display: bool = False,
     current_user=Depends(get_current_user),
 ):
     logger.info(
@@ -45,7 +47,12 @@ async def analyze_video(
         display=display,
     )
     logger.info("Analyze video completed for match_id=%s", match_id)
-    return success_response(data=result.result, message="Video analyzed")
+    analyzed = AnalyzeVideoResult.parse_obj(result.result)
+    return {
+        "status": "success",
+        "data": analyzed,
+        "message": "Video analyzed",
+    }
 
 @router.post("/detect/ball")
 async def detect_ball(video_file: UploadFile = File(...), current_user=Depends(get_current_user)):

@@ -86,6 +86,13 @@ class YOLOBallDetector:
 
 _global_yolo_detector = None
 
+
+def _effective_imgsz(detector):
+    configured = int(GLOBAL_CONFIG['imgsz'])
+    if getattr(detector, 'device', 'cpu') == 'cpu':
+        return min(configured, 640)
+    return configured
+
 def get_global_yolo_detector():
     global _global_yolo_detector
     model1_path = DETECTION_CONFIG.get('model1_path')
@@ -102,13 +109,13 @@ def get_global_yolo_detector():
 def yolo_detect_ball(detector, frame):
     conf = DETECTION_CONFIG['conf_threshold']
     iou = DETECTION_CONFIG['iou_threshold']
-    imgsz = GLOBAL_CONFIG['imgsz']
+    imgsz = _effective_imgsz(detector)
     return detector.detect(frame, conf=conf, iou=iou, imgsz=imgsz)
 
 def yolo_detect_ball_roi(detector, frame_crop, offset_coords):
     conf = DETECTION_CONFIG['conf_threshold']
     iou = DETECTION_CONFIG['iou_threshold']
-    imgsz = GLOBAL_CONFIG['imgsz']
+    imgsz = _effective_imgsz(detector)
     return detector.detect_roi(frame_crop, offset_coords, conf=conf, iou=iou, imgsz=imgsz)
 
 def yolo_detect_ball_lowconf(detector, frame, conf):

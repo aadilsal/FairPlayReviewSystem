@@ -1,6 +1,9 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
+
+
+LbwDecision = Literal["OUT", "NOT OUT"]
 
 class ReviewBase(BaseModel):
     match_id: int
@@ -8,8 +11,8 @@ class ReviewBase(BaseModel):
     user_id: Optional[int] = None
     delivery: Optional[str] = None
     over: Optional[str] = None
-    original_decision: Optional[str] = None
-    decision: Optional[str] = None
+    original_decision: Optional[LbwDecision] = None
+    decision: Optional[LbwDecision] = None
     impact: Optional[str] = None
     pitch: Optional[str] = None
     wickets: Optional[str] = None
@@ -24,8 +27,8 @@ class ReviewCreate(ReviewBase):
 class ReviewUpdate(BaseModel):
     delivery: Optional[str] = None
     over: Optional[str] = None
-    original_decision: Optional[str] = None
-    decision: Optional[str] = None
+    original_decision: Optional[LbwDecision] = None
+    decision: Optional[LbwDecision] = None
     impact: Optional[str] = None
     pitch: Optional[str] = None
     wickets: Optional[str] = None
