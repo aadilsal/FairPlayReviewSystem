@@ -3,6 +3,7 @@ import json
 import os
 import re
 import numpy as np
+import logging
 
 from BallDetection.pipeline.ball_detector import detect_ball
 from BallDetection.pipeline.trajectory import fit_trajectory
@@ -23,6 +24,9 @@ from lbw_analyzer import (
     missing_clip_overlay,
 )
 from lbw_review_card import render_lbw_review_card
+
+
+logger = logging.getLogger("fairplay.pipeline")
 
 
 def _safe_video_stem(name: str) -> str:
@@ -65,8 +69,16 @@ def process_frames_pipeline(
     all_ball_infos = []
     frame_records = []
     n_paths = len(frame_paths)
+    if n_paths == 0:
+        logger.warning("No frames provided to process_frames_pipeline")
+        return
+
+    progress_step = max(1, n_paths // 10)
+    logger.info("Pipeline pass 1/2 started: analyzing %s frames", n_paths)
 
     for frame_idx, frame_path in enumerate(frame_paths):
+        if frame_idx % progress_step == 0:
+            logger.info("Pipeline pass 1/2 progress: %s/%s frames", frame_idx, n_paths)
         clean_frame = cv2.imread(frame_path)
         if clean_frame is None:
             print(f"[WARN] Could not read {frame_path}")
@@ -133,7 +145,7 @@ def process_frames_pipeline(
                     tracking_active = True
                     metadata["tracking_active"] = True
                     det_batsman_box = list(map(int, bbox))
-                    print(f"[INFO] ✅ Batsman confirmed at frame {frame_idx}")
+                    logger.info("Batsman confirmed at frame %s", frame_idx)
         else:
             ok, bbox = batsman_tracker.update(frame.copy())
             if ok:
@@ -141,7 +153,7 @@ def process_frames_pipeline(
                 metadata["tracking_active"] = True
                 metadata["detections"].append({"label": "Batsman", "box": det_batsman_box, "tracked": True})
             else:
-                print(f"[WARN] Tracker lost at frame {frame_idx}")
+                logger.warning("Tracker lost at frame %s", frame_idx)
                 tracking_active = False
                 batsman_finder = BatsmanFinder(iou_thresh=iou_thresh, consec_required=consec_required)
                 batsman_tracker = BatsmanTracker()
@@ -211,6 +223,8 @@ def process_frames_pipeline(
     for rec in frame_records:
         frame_path = rec["path"]
         fi = int(rec["metadata"]["frame_index"])
+        if fi % progress_step == 0:
+            logger.info("Pipeline pass 2/2 progress: %s/%s frames", fi, n_paths)
         clean_frame = cv2.imread(frame_path)
         if clean_frame is None:
             continue
@@ -346,4 +360,5 @@ def process_frames_pipeline(
                     "skipping single-frame LBW image."
                 )
 
+    logger.info("Pipeline completed for %s frames", n_paths)
     cv2.destroyAllWindows()

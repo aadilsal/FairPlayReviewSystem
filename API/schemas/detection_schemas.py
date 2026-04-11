@@ -1,5 +1,8 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Literal
+
+
+LbwDecision = Literal["OUT", "NOT OUT"]
 
 class VideoAnalysisRequest(BaseModel):
     match_id: int
@@ -13,3 +16,19 @@ class VideoAnalysisRequest(BaseModel):
 class DetectionResult(BaseModel):
     result: Dict[str, Any]
     message: Optional[str] = None
+
+
+class AnalyzeVideoResult(BaseModel):
+    decision: LbwDecision
+    original_decision: Optional[LbwDecision] = None
+    confidence: Optional[float] = None
+    review_outcome: Optional[Literal["inconclusive"]] = None
+
+    class Config:
+        extra = "allow"
+
+
+class AnalyzeVideoSuccessResponse(BaseModel):
+    status: Literal["success"]
+    data: AnalyzeVideoResult
+    message: str
