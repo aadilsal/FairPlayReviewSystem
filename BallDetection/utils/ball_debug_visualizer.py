@@ -60,8 +60,7 @@ def draw_trajectory_overlay(
     }
 
     valid_indices = range(len(ball_infos)) if current_frame_idx is None else range(current_frame_idx + 1)
-    
-    prev_pos = None
+    current_info = None
     for i in valid_indices:
         info = ball_infos[i]
         if info is None or info.get('ghost', False):
@@ -71,30 +70,22 @@ def draw_trajectory_overlay(
         if source is None:
             source = 'yolo-anchor'
 
-        color = color_map.get(source, (255, 255, 255))
-
         if 'interpolated_position' in info and info['interpolated_position'] is not None:
             pos = info['interpolated_position']
         else:
             box = info.get('box', [0.0, 0.0, 0.0, 0.0])
             pos = (box[0] + box[2] / 2.0, box[1] + box[3] / 2.0)
 
-        pos_int = (int(pos[0]), int(pos[1]))
+        if current_frame_idx is not None and i == current_frame_idx:
+            current_info = info
+        elif current_frame_idx is None:
+            current_info = info
 
-        # Draw line segment from previous point
-        if prev_pos is not None:
-            cv2.line(output, prev_pos, pos_int, color, 2)
-
-        # Draw point
-        cv2.circle(output, pos_int, 4, color, -1)
-        prev_pos = pos_int
-
-        # Draw ball bbox as a circle ONLY for the current frame's detection
-        if (
-            'box' in info and info['box'] is not None and
-            ((current_frame_idx is not None and i == current_frame_idx) or (current_frame_idx is None and i == len(ball_infos) - 1))
-        ):
-            x, y, w, h = info['box']
+    if current_info is not None:
+        source = current_info.get('source', 'yolo-anchor')
+        color = color_map.get(source, (255, 255, 255))
+        if 'box' in current_info and current_info['box'] is not None:
+            x, y, w, h = current_info['box']
             center = (int(x + w / 2), int(y + h / 2))
             radius = int(0.5 * (w + h) / 2)
             cv2.circle(output, center, radius, color, 2)

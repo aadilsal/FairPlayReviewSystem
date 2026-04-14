@@ -120,46 +120,25 @@ def visualize_pads(det_pads, vis_frame, show_feet=False, use_union=True):
 def visualize_ball(det_ball, vis_frame, frame_idx):
     if not det_ball or frame_idx >= len(det_ball):
         return
-        
+
     color_map = {
-        'yolo': (0, 255, 0),         # Green
-        'yolo-rescue': (0, 255, 255), # Yellow
-        'csrt-agreed': (255, 255, 0), # Cyan
-        'kinematic': (0, 0, 255)      # Red
+        'yolo': (0, 255, 0),
+        'yolo-rescue': (0, 255, 255),
+        'csrt-agreed': (255, 255, 0),
+        'kinematic': (0, 0, 255),
+        'edge-suspected': (0, 0, 255),
     }
 
-    prev_pos = None
-
-    for i in range(frame_idx + 1):
-        info = det_ball[i]
-        if info is None or info.get('ghost', False):
-            continue
-
-        if 'interpolated_position' in info and info['interpolated_position'] is not None:
-            pos = info['interpolated_position']
-        else:
-            box = info.get('box', [0, 0, 0, 0])
-            pos = (box[0] + box[2] / 2.0, box[1] + box[3] / 2.0)
-        
-        pos_int = (int(pos[0]), int(pos[1]))
-        source = info.get('source', 'yolo')
+    current_info = det_ball[frame_idx]
+    if current_info is not None and not current_info.get('ghost', False):
+        source = current_info.get('source', 'yolo')
         color = color_map.get(source, (0, 255, 0))
-
-        if prev_pos is not None:
-            cv2.line(vis_frame, prev_pos, pos_int, color, 2)
-        
-        cv2.circle(vis_frame, pos_int, 2, color, -1)
-        prev_pos = pos_int
-
-        if i == frame_idx:
-            raw_box = info.get('box', [0, 0, 0, 0])
-            curr_center = (int(raw_box[0] + raw_box[2]/2), int(raw_box[1] + raw_box[3]/2))
-            
-            radius = int((raw_box[2] + raw_box[3]) / 4) if raw_box[2] > 0 else 5
-            
-            cv2.circle(vis_frame, curr_center, radius, color, 2) 
-            cv2.putText(vis_frame, "Ball", (curr_center[0] + radius + 5, curr_center[1]), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        raw_box = current_info.get('box', [0, 0, 0, 0])
+        curr_center = (int(raw_box[0] + raw_box[2] / 2), int(raw_box[1] + raw_box[3] / 2))
+        radius = int((raw_box[2] + raw_box[3]) / 4) if raw_box[2] > 0 else 5
+        cv2.circle(vis_frame, curr_center, radius, color, 2)
+        cv2.putText(vis_frame, "Ball", (curr_center[0] + radius + 5, curr_center[1]),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
 def visualize_pose(det_pose, vis_frame):
     if not det_pose:
