@@ -6,6 +6,7 @@ import numpy as np
 import logging
 
 from BallDetection.pipeline.ball_detector import detect_ball
+from BallDetection.pipeline.post_processor import PostProcessor
 from BallDetection.pipeline.trajectory import fit_trajectory
 from pose_estimator import estimate_pose
 from person_detector import detect_persons
@@ -67,6 +68,7 @@ def process_frames_pipeline(
     tracking_active = False
 
     all_ball_infos = []
+    detection_frames = []
     frame_records = []
     n_paths = len(frame_paths)
     if n_paths == 0:
@@ -96,6 +98,8 @@ def process_frames_pipeline(
             )
         else:
             frame = clean_frame.copy()
+
+        detection_frames.append(frame.copy())
 
         metadata = {
             "frame_index": frame_idx,
@@ -182,6 +186,51 @@ def process_frames_pipeline(
             "metadata": metadata,
         })
 
+        if display:
+            live_frame = visualize_frame(
+                frame.copy(),
+                all_ball_infos,
+                det_persons,
+                det_batsman_box,
+                det_wickets,
+                det_bats,
+                det_pads,
+                det_pose,
+                frame_idx,
+                lbw_overlay=None,
+            )
+            cv2.putText(
+                live_frame,
+                "LIVE: detection / tracking",
+                (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            cv2.imshow("FairPlayReviewSystem - Live", live_frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                display = False
+
+    post_processor = PostProcessor()
+    post_processed_json_path = os.path.join(
+        os.path.dirname(os.path.abspath(str(frame_paths[0]))),
+        "post_processed_track.json",
+    )
+    all_ball_infos = post_processor.process(
+        all_ball_infos,
+        detection_frames,
+        render_debug=False,
+        output_json_path=post_processed_json_path,
+    )
+
+    for rec, ball_info in zip(frame_records, all_ball_infos):
+        detections = [d for d in rec["metadata"]["detections"] if d.get("label") != "Ball"]
+        if ball_info is not None and not ball_info.get("ghost", False):
+            detections.insert(0, {"label": "Ball", "data": ball_info})
+        rec["metadata"]["detections"] = detections
+
     anchors = build_anchors_from_ball_infos(all_ball_infos)
     trajectory_model = fit_trajectory(anchors)
 
@@ -261,11 +310,6 @@ def process_frames_pipeline(
         meta_path = os.path.splitext(frame_path)[0] + ".json"
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(_sanitize_for_json(metadata), f, indent=2)
-        if display:
-            cv2.imshow("FairPlayReviewSystem", vis_frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-
     if video_stem and frames_dir and frame_records:
         safe = _safe_video_stem(str(video_stem))
         parent_dir = os.path.dirname(os.path.abspath(frames_dir))

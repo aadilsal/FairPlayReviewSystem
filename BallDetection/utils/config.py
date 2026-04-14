@@ -1,6 +1,9 @@
 DETECTION_CONFIG = {
-    'model2_path': 'weights/ball-yolov8s.pt',  # High Precision (Model A)
-    'model1_path': 'weights/yolov8_cricket_ball2/weights/best.pt',  # High Recall (Model B)
+    'model2_path': 'weights/yolov8_cricket_ball2/weights/best.pt',  # High Precision (Model A)
+    # PRIOTITY for model 2:
+    # 1.weights/yolov8_cricket_ball2/weights/best.pt
+    # 2.weights/ball-yolov8s.pt
+    'model1_path': 'weights/ball_weights_new.pt',  # High Recall (Model B)
     'conf_threshold': 0.05,
     'iou_threshold': 0.1
 }

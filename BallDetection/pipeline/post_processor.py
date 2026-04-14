@@ -33,6 +33,8 @@ class PostProcessor:
             logger.warning("[POST-PROCESSOR] No anchors found in sequence. Skipping rescue pipeline.")
             return ball_infos
 
+        first_anchor_idx = min(int(a['frame_idx']) for a in anchors if a.get('frame_idx') is not None)
+
         # 2. Classify Gaps (idempotent analysis of missing/ghost frame sequences)
         gaps = classify_gaps(ball_infos)
         
@@ -47,7 +49,13 @@ class PostProcessor:
         corridor_width = POST_PROCESSOR_CONFIG.get('CORRIDOR_WIDTH_PX', 40)
 
         for gap in gaps:
+            if gap.end_frame < first_anchor_idx:
+                continue
+
             for frame_idx in range(gap.start_frame, gap.end_frame + 1):
+                if frame_idx < first_anchor_idx:
+                    continue
+
                 # Only attempt rescue if we have a valid trajectory model for this point in time
                 pred_pos = predict_position(trajectory_model, frame_idx)
                 if pred_pos is None:
@@ -87,13 +95,13 @@ class PostProcessor:
                     logger.info(f"[POST-PROCESSOR] Rescued frame {frame_idx} via YOLO (dist={best_dist:.1f}px, conf={rconf:.2f})")
 
         # 6. Run CSRT tracking (Phase 4 — stubbed)
-        self._run_csrt_rescue(enriched_infos, frames, gaps, trajectory_model)
+        self._run_csrt_rescue(enriched_infos, frames, gaps, trajectory_model, first_anchor_idx)
 
         # 7. Run kinematic fallback (Phase 5 — stubbed)
-        self._run_kinematic_fallback(enriched_infos, trajectory_model)
+        self._run_kinematic_fallback(enriched_infos, trajectory_model, first_anchor_idx)
 
         # 8. Final Segment-Aware Kalman Smoothing (Phase 5)
-        self._run_final_smoothing(enriched_infos, trajectory_model)
+        self._run_final_smoothing(enriched_infos, trajectory_model, first_anchor_idx)
 
         # 9. Output Generation
         final_output = generate_output(enriched_infos)
@@ -115,14 +123,17 @@ class PostProcessor:
 
         return enriched_infos
 
-    def _run_csrt_rescue(self, ball_infos, frames, gaps, model):
+    def _run_csrt_rescue(self, ball_infos, frames, gaps, model, first_anchor_idx: int):
         """Phase 4: Bidirectional CSRT tracking with agreement verification."""
         for gap in gaps:
+            if gap.end_frame < first_anchor_idx:
+                continue
+
             # We only use CSRT if there are still None/ghost frames in the gap
             # because YOLO rescue might have already filled some or all of it.
             # Find the longest contiguous sub-gap of unrescued frames
             need_csrt = [i for i in range(gap.start_frame, gap.end_frame + 1) 
-                         if ball_infos[i] is None or ball_infos[i].get('ghost', False)]
+                         if i >= first_anchor_idx and (ball_infos[i] is None or ball_infos[i].get('ghost', False))]
             
             if not need_csrt:
                 continue
@@ -147,7 +158,7 @@ class PostProcessor:
                 
                 for f_idx, result in merged.items():
                     # Only apply if it's still missing (don't overwrite YOLO rescues)
-                    if ball_infos[f_idx] is None or ball_infos[f_idx].get('ghost', False):
+                    if f_idx >= first_anchor_idx and (ball_infos[f_idx] is None or ball_infos[f_idx].get('ghost', False)):
                         box = result['box']
                         ball_infos[f_idx] = {
                             'box': box,
@@ -165,10 +176,10 @@ class PostProcessor:
                         
                         logger.info(f"[POST-PROCESSOR] Rescued frame {f_idx} via CSRT ({result['source']})")
 
-    def _run_kinematic_fallback(self, ball_infos, model):
+    def _run_kinematic_fallback(self, ball_infos, model, first_anchor_idx: int):
         """Phase 5: Pure physics-only projection for total blackouts and edge intersection."""
         # 1. Resolve edge-suspected frames (Trackers disagreed during occlusion)
-        for i in range(len(ball_infos)):
+        for i in range(first_anchor_idx, len(ball_infos)):
             info = ball_infos[i]
             if info is not None and info.get('source') == 'edge-suspected':
                 # Build forward arc (recent past + current tracker prediction)
@@ -202,7 +213,7 @@ class PostProcessor:
                     logger.info(f"[POST-PROCESSOR] Edge visually resolved at frame {i}: {intersect}")
 
         # 2. Fill in remaining None/ghost frames with pure projection
-        for i in range(len(ball_infos)):
+        for i in range(first_anchor_idx, len(ball_infos)):
             info = ball_infos[i]
             if info is None or info.get('ghost', False):
                 pos = kinematic_project_position(model, i)
@@ -220,11 +231,11 @@ class PostProcessor:
                     }
                     logger.info(f"[POST-PROCESSOR] Rescued frame {i} via Kinematics")
 
-    def _run_final_smoothing(self, ball_infos, model):
+    def _run_final_smoothing(self, ball_infos, model, first_anchor_idx: int):
         """Phase 5: Re-running Kalman filter while preserving the 'V' at bounce points."""
         smoothed_positions = segment_aware_smooth(ball_infos, model.bounce_frame)
         
         for i, pos in enumerate(smoothed_positions):
-            if ball_infos[i] is not None:
+            if i >= first_anchor_idx and ball_infos[i] is not None:
                 # Update the interpolated position with the segmented smoothing result
                 ball_infos[i]['interpolated_position'] = pos

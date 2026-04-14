@@ -598,7 +598,7 @@ def main() -> int:
             "By default this script uses a local YOLOv8 dataset (Roboflow export)."
         )
     )
-    ap.add_argument("--weights", default="weights/ball-yolov8s.pt", help="Path to your ball YOLO weights.")
+    ap.add_argument("--weights", default="weights/ball_weights_new.pt", help="Path to your ball YOLO weights.")
     ap.add_argument(
         "--dataset-root",
         default="Cricket Dataset.v1i.yolov8",
