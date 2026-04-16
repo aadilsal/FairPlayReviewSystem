@@ -36,7 +36,8 @@ def _segment_for_time(model: TrajectoryModel, t: float) -> Optional[SegmentModel
     if not model.segments:
         return None
     target = model.segments[0]
-    if model.bounce_frame is not None and t >= float(model.bounce_frame):
+    bounce_split = model.bounce_time if getattr(model, "bounce_time", None) is not None else model.bounce_frame
+    if bounce_split is not None and t >= float(bounce_split):
         target = model.segments[-1]
     for seg in model.segments:
         if seg.start_frame <= t <= seg.end_frame:
@@ -48,9 +49,12 @@ def _segment_for_time(model: TrajectoryModel, t: float) -> Optional[SegmentModel
 def sample_ballistic_extension(
     model: TrajectoryModel,
     t_start: float,
+    geom: Optional[WicketGeometry] = None,
+    stop_on_reverse: bool = False,
     num_steps: int = 260,
     dt: float = 1.0,
     gravity_y: float = _DEFAULT_GRAVITY_Y,
+    min_projection_step: float = 1e-4,
 ) -> List[Tuple[float, float]]:
     """
     Continue the path past the last fit using velocity at t_start plus constant
@@ -65,10 +69,29 @@ def sample_ballistic_extension(
     vx = float(2.0 * seg.x_coeffs[0] * t_start + seg.x_coeffs[1])
     vy = float(2.0 * seg.y_coeffs[0] * t_start + seg.y_coeffs[1])
     pts: List[Tuple[float, float]] = []
+    prev_s: Optional[float] = None
+    toward_sign = 0.0
+    if geom is not None and stop_on_reverse:
+        prev_s = geom.projection_s(x, y)
+        toward_delta = geom.s_stump - prev_s
+        if toward_delta > 0:
+            toward_sign = 1.0
+        elif toward_delta < 0:
+            toward_sign = -1.0
+
     for _ in range(num_steps):
         x += vx * dt
         y += vy * dt
         vy += gravity_y * dt
+
+        if geom is not None and stop_on_reverse and prev_s is not None and toward_sign != 0.0:
+            curr_s = geom.projection_s(x, y)
+            ds = curr_s - prev_s
+            # Discard the "coming back" tail once motion along wicket axis reverses.
+            if ds * toward_sign < -min_projection_step:
+                break
+            prev_s = curr_s
+
         pts.append((x, y))
     return pts
 
@@ -366,6 +389,8 @@ def extrapolate_stump_intersection(
     max_steps: int = 800,
     dt: float = 0.35,
     gravity_y: float = _DEFAULT_GRAVITY_Y,
+    stop_on_reverse: bool = True,
+    min_projection_step: float = 1e-4,
 ) -> Tuple[Optional[Tuple[float, float]], bool, float]:
     """
     March forward with the same ballistic model as the purple preview line until
@@ -386,6 +411,13 @@ def extrapolate_stump_intersection(
     s_target = geom.s_stump
     prev_x, prev_y = x, y
     prev_s = geom.projection_s(x, y)
+    toward_delta = s_target - prev_s
+    if toward_delta > 0:
+        toward_sign = 1.0
+    elif toward_delta < 0:
+        toward_sign = -1.0
+    else:
+        toward_sign = 0.0
     pseudo_t = float(t_start)
 
     for _ in range(max_steps):
@@ -394,6 +426,12 @@ def extrapolate_stump_intersection(
         vy += gravity_y * dt
         pseudo_t += dt
         s = geom.projection_s(x, y)
+
+        if stop_on_reverse and toward_sign != 0.0:
+            ds = s - prev_s
+            if ds * toward_sign < -min_projection_step:
+                return None, False, pseudo_t
+
         if (prev_s - s_target) * (s - s_target) <= 0 and abs(s - prev_s) > 1e-6:
             alpha = abs(s_target - prev_s) / (abs(s - prev_s) + 1e-9)
             alpha = float(np.clip(alpha, 0.0, 1.0))
@@ -431,14 +469,28 @@ def analyze_lbw_sequence(
     bounce_f = trajectory_model.bounce_frame
     out["bounce_frame"] = bounce_f
 
+    bounce_time = getattr(trajectory_model, "bounce_time", None)
+    if bounce_time is not None:
+        bounce_point = predict_position(trajectory_model, float(bounce_time))
+        if bounce_point is not None:
+            out["bounce_point"] = [float(bounce_point[0]), float(bounce_point[1])]
+            out["bounce_time"] = float(bounce_time)
+
     pitch_point: Optional[Tuple[float, float]] = None
-    if bounce_f is not None:
+    pitch_frame_idx: Optional[int] = None
+    if bounce_time is not None:
+        pitch_point = predict_position(trajectory_model, float(bounce_time))
+        pitch_frame_idx = int(bounce_f) if bounce_f is not None else int(np.floor(float(bounce_time)))
+    elif bounce_f is not None:
         pitch_point = predict_position(trajectory_model, float(bounce_f))
+        pitch_frame_idx = int(bounce_f)
     if pitch_point is None and trajectory_model.segments:
         t0 = trajectory_model.segments[0].start_frame
         pitch_point = predict_position(trajectory_model, float(t0))
+        pitch_frame_idx = int(t0)
     if pitch_point is not None:
         out["pitch_point"] = [float(pitch_point[0]), float(pitch_point[1])]
+        out["pitch_frame_idx"] = pitch_frame_idx
 
     impact_idx, impact_pt = find_pad_body_impact(
         ball_infos,
@@ -456,9 +508,15 @@ def analyze_lbw_sequence(
         t_min = min(a["frame_idx"] for a in anchors)
         t_max = max(a["frame_idx"] for a in anchors)
 
-    last_t = float(t_max)
+    out["fitted_start_frame"] = int(t_min)
+    fitted_end_frame = int(t_max)
+    if impact_idx is not None:
+        fitted_end_frame = max(int(t_min), min(int(t_max), int(impact_idx)))
+    out["fitted_end_frame"] = int(fitted_end_frame)
 
-    fitted = sample_fitted_polyline(trajectory_model, int(t_min), int(t_max), step=1)
+    last_t = float(fitted_end_frame)
+
+    fitted = sample_fitted_polyline(trajectory_model, int(t_min), int(fitted_end_frame), step=1)
     out["fitted_polyline"] = [[float(x), float(y)] for x, y in fitted]
 
     # Continue from last observed frame so the preview runs past the batsman toward stumps.
@@ -479,6 +537,15 @@ def analyze_lbw_sequence(
     line_seg = geom.extended_line_segment()
     out["wicket_line"] = [list(line_seg[0]), list(line_seg[1])]
 
+    # Rebuild extension with wicket-axis direction gating so rebound segments are discarded.
+    ext_pts = sample_ballistic_extension(
+        trajectory_model,
+        t_start=last_t,
+        geom=geom,
+        stop_on_reverse=True,
+    )
+    out["predicted_extension"] = [[float(x), float(y)] for x, y in ext_pts]
+
     pitch_inline = False
     if pitch_point is not None:
         pitch_inline = geom.inline_distance(pitch_point[0], pitch_point[1]) <= geom.lateral_threshold
@@ -488,7 +555,10 @@ def analyze_lbw_sequence(
         impact_inline = geom.inline_distance(impact_pt[0], impact_pt[1]) <= geom.lateral_threshold
 
     stump_pt, wickets_hit, _t_cross = extrapolate_stump_intersection(
-        trajectory_model, geom, t_start=last_t
+        trajectory_model,
+        geom,
+        t_start=last_t,
+        stop_on_reverse=True,
     )
     if stump_pt is not None:
         out["stump_intersection"] = [float(stump_pt[0]), float(stump_pt[1])]
@@ -511,10 +581,15 @@ def _empty_overlay(n_frames: int) -> Dict[str, Any]:
         "impact_inline": False,
         "wickets_hitting": False,
         "pitch_point": None,
+        "bounce_point": None,
+        "bounce_time": None,
+        "pitch_frame_idx": None,
         "impact_point": None,
         "stump_intersection": None,
         "impact_frame_idx": None,
         "bounce_frame": None,
+        "fitted_start_frame": 0,
+        "fitted_end_frame": 0,
         "decision": NO_DECISION,
         "geometric_lbw": False,
         "fitted_polyline": [],
@@ -534,5 +609,7 @@ def lbw_overlay_for_api(overlay: Dict[str, Any]) -> Dict[str, Any]:
         "reason": overlay.get("reason"),
         "impact_frame_idx": overlay.get("impact_frame_idx"),
         "bounce_frame": overlay.get("bounce_frame"),
+        "bounce_time": overlay.get("bounce_time"),
+        "pitch_frame_idx": overlay.get("pitch_frame_idx"),
         "geometric_lbw": overlay.get("geometric_lbw", False),
     }

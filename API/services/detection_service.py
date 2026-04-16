@@ -12,6 +12,10 @@ from API.utils.lbw_decision import resolve_final_lbw_decision, sanitize_predicti
 from API.schemas.review_schemas import ReviewCreate
 from API.services.review_service import ReviewService
 from API.services.wicket_config_service import WicketConfigService
+from API.services.snick_detection_service import SnickDetectionService, AudioAnalysisConfig
+from API.core.config import settings
+from utils.audio_extractor import extract_audio_to_wav, AudioExtractionError
+from global_config import GLOBAL_CONFIG
 import sys
 import os
 import uuid
@@ -163,6 +167,129 @@ def _lbw_review_card_path(frames_dir: Path) -> Path:
     return frames_dir / f"lbw_review_card_{run_tag}.jpg"
 
 
+def _clamp01(x: float) -> float:
+    return max(0.0, min(1.0, float(x)))
+
+
+def _ball_center_from_detection(detections: list[dict]) -> tuple[float, float] | None:
+    for d in detections:
+        if d.get("label") != "Ball":
+            continue
+        data = d.get("data") or {}
+        ip = data.get("interpolated_position")
+        if isinstance(ip, (list, tuple)) and len(ip) >= 2:
+            return float(ip[0]), float(ip[1])
+        box = data.get("box")
+        if isinstance(box, (list, tuple)) and len(box) == 4:
+            x, y, w, h = box
+            return float(x + w / 2.0), float(y + h / 2.0)
+    return None
+
+
+def _distance_point_to_box(px: float, py: float, box: list[float]) -> float:
+    x, y, w, h = [float(v) for v in box]
+    nx = min(max(px, x), x + w)
+    ny = min(max(py, y), y + h)
+    return float(((px - nx) ** 2 + (py - ny) ** 2) ** 0.5)
+
+
+def _estimate_visual_contact_score(frames_dir: Path, impact_frame_idx: int | None) -> tuple[float, dict]:
+    if impact_frame_idx is None:
+        return 0.0, {"reason": "impact_frame_missing"}
+
+    best_score = 0.0
+    best_frame = None
+    best_distance = None
+
+    for fi in range(max(0, impact_frame_idx - 3), impact_frame_idx + 4):
+        frame_json = frames_dir / f"frame_{fi:06d}.json"
+        if not frame_json.exists():
+            continue
+        try:
+            with open(frame_json, "r", encoding="utf-8") as f:
+                frame_meta = json.load(f)
+        except Exception:
+            continue
+
+        detections = frame_meta.get("detections", [])
+        center = _ball_center_from_detection(detections)
+        if center is None:
+            continue
+
+        bat_boxes = [d.get("box") for d in detections if d.get("label") == "Bat" and isinstance(d.get("box"), list)]
+        if not bat_boxes:
+            continue
+
+        px, py = center
+        min_dist = min(_distance_point_to_box(px, py, b) for b in bat_boxes)
+        spatial = _clamp01(1.0 - (min_dist / 40.0))
+        temporal = _clamp01(1.0 - (abs(fi - impact_frame_idx) / 5.0))
+        score = spatial * (0.7 + 0.3 * temporal)
+        if score > best_score:
+            best_score = score
+            best_frame = fi
+            best_distance = min_dist
+
+    return float(best_score), {
+        "best_frame": best_frame,
+        "best_distance_px": best_distance,
+    }
+
+
+def _fuse_snick_scores(
+    *,
+    visual_score: float,
+    audio_result: dict,
+    impact_frame_idx: int | None,
+    fps: int,
+) -> dict:
+    if audio_result.get("status") != "ok":
+        return {
+            "status": "unavailable",
+            "snick_detected": False,
+            "snick_confidence": None,
+            "snick_timestamp_ms": None,
+            "reason": audio_result.get("reason") or "audio_unavailable",
+            "visual_score": float(visual_score),
+            "audio_score": None,
+            "fused_score": None,
+        }
+
+    audio_score = float(audio_result.get("audio_confidence") or 0.0)
+    event_ts = audio_result.get("best_event_timestamp_ms")
+    target_ts = None
+    if impact_frame_idx is not None and fps > 0:
+        target_ts = (float(impact_frame_idx) / float(fps)) * 1000.0
+
+    align_window_ms = int(getattr(settings, "SNICK_ALIGN_WINDOW_MS", GLOBAL_CONFIG.get("snick_align_window_ms", 80)))
+    if target_ts is not None and event_ts is not None:
+        if abs(float(event_ts) - target_ts) > float(align_window_ms):
+            audio_score *= 0.35
+
+    wv = float(getattr(settings, "SNICK_VISUAL_WEIGHT", GLOBAL_CONFIG.get("snick_visual_weight", 0.45)))
+    wa = float(getattr(settings, "SNICK_AUDIO_WEIGHT", GLOBAL_CONFIG.get("snick_audio_weight", 0.55)))
+    den = max(1e-6, wv + wa)
+    fused = _clamp01((wv * float(visual_score) + wa * float(audio_score)) / den)
+
+    detect_threshold = float(
+        getattr(settings, "SNICK_DETECT_THRESHOLD", GLOBAL_CONFIG.get("snick_detect_threshold", 0.62))
+    )
+    detected = bool(fused >= detect_threshold and float(visual_score) >= 0.25)
+
+    return {
+        "status": "ok",
+        "snick_detected": detected,
+        "snick_confidence": float(fused),
+        "snick_timestamp_ms": float(event_ts) if event_ts is not None else None,
+        "reason": None,
+        "visual_score": float(visual_score),
+        "audio_score": float(audio_score),
+        "fused_score": float(fused),
+        "audio_event_count": int(audio_result.get("candidate_event_count") or 0),
+        "audio_top_events": audio_result.get("top_events") or [],
+    }
+
+
 def _read_jpeg_as_data_url(path: Path) -> str | None:
     if not path.is_file():
         return None
@@ -223,6 +350,7 @@ class DetectionService:
 
         file_path = save_upload_file(video_file)
         record = None
+        extracted_audio_path = None
         started_at = time.perf_counter()
 
         try:
@@ -242,6 +370,19 @@ class DetectionService:
 
             frames_dir = Path(_PROJECT_ROOT) / "outputs" / "frames" / folder_name
             frames_dir.mkdir(parents=True, exist_ok=True)
+
+            # Extract audio once and reuse for snick analysis after visual impact frame is known.
+            try:
+                extracted_audio_path = extract_audio_to_wav(
+                    file_path,
+                    output_wav_path=str(frames_dir / f"{video_name}_audio.wav"),
+                    sample_rate=int(getattr(settings, "SNICK_AUDIO_SAMPLE_RATE", 16000)),
+                    ffmpeg_binary=(getattr(settings, "FFMPEG_BINARY", "") or None),
+                )
+                logger.info("[analyze_video] Extracted audio for snick analysis: %s", extracted_audio_path)
+            except AudioExtractionError as exc:
+                logger.warning("[analyze_video] Audio extraction unavailable: %s", exc)
+                extracted_audio_path = None
 
             extract_video_frames(file_path, str(frames_dir), fps)
 
@@ -306,6 +447,72 @@ class DetectionService:
             prediction = sanitize_prediction_decisions(prediction, decision)
             confidence = prediction["confidence"]
 
+            impact_frame_idx = prediction.get("impact_frame_idx")
+            visual_score, visual_diag = _estimate_visual_contact_score(frames_dir, impact_frame_idx)
+
+            if extracted_audio_path:
+                try:
+                    audio_result = SnickDetectionService.analyze(
+                        extracted_audio_path,
+                        fps=fps,
+                        preferred_frame_idx=impact_frame_idx,
+                        config=AudioAnalysisConfig(
+                            low_hz=int(getattr(settings, "SNICK_LOW_HZ", GLOBAL_CONFIG.get("snick_low_hz", 1200))),
+                            high_hz=int(getattr(settings, "SNICK_HIGH_HZ", GLOBAL_CONFIG.get("snick_high_hz", 6500))),
+                            peak_prominence=float(
+                                getattr(settings, "SNICK_PEAK_PROMINENCE", GLOBAL_CONFIG.get("snick_peak_prominence", 2.5))
+                            ),
+                            align_window_ms=int(
+                                getattr(settings, "SNICK_ALIGN_WINDOW_MS", GLOBAL_CONFIG.get("snick_align_window_ms", 80))
+                            ),
+                        ),
+                    )
+                except Exception as exc:
+                    logger.warning("[analyze_video] Snick analysis failed, using fallback: %s", exc)
+                    audio_result = {
+                        "status": "unavailable",
+                        "reason": f"analysis_failed: {exc}",
+                        "snick_detected": False,
+                        "audio_confidence": 0.0,
+                    }
+            else:
+                audio_result = {
+                    "status": "unavailable",
+                    "reason": "ffmpeg_unavailable_or_extraction_failed",
+                    "snick_detected": False,
+                    "audio_confidence": 0.0,
+                }
+
+            snick_result = _fuse_snick_scores(
+                visual_score=visual_score,
+                audio_result=audio_result,
+                impact_frame_idx=impact_frame_idx,
+                fps=fps,
+            )
+
+            low_threshold = float(
+                getattr(settings, "SNICK_LOW_THRESHOLD", GLOBAL_CONFIG.get("snick_low_threshold", 0.30))
+            )
+            if snick_result.get("status") == "ok":
+                fused = float(snick_result.get("fused_score") or 0.0)
+                if snick_result.get("snick_detected"):
+                    confidence = _clamp01(float(confidence) + 0.12 * fused)
+                elif fused < low_threshold and visual_score > 0.45:
+                    confidence = _clamp01(float(confidence) - 0.05)
+                prediction["confidence"] = confidence
+
+            prediction["snick"] = {
+                "status": snick_result.get("status"),
+                "detected": snick_result.get("snick_detected"),
+                "confidence": snick_result.get("snick_confidence"),
+                "timestamp_ms": snick_result.get("snick_timestamp_ms"),
+                "reason": snick_result.get("reason"),
+                "visual_score": snick_result.get("visual_score"),
+                "audio_score": snick_result.get("audio_score"),
+                "fused_score": snick_result.get("fused_score"),
+                "visual_diagnostics": visual_diag,
+            }
+
             result_payload = {
                 "match_id": match_id,
                 "user_id": user_id,
@@ -324,6 +531,11 @@ class DetectionService:
                 "wickets": wickets,
                 "decision": decision,
                 "confidence": confidence,
+                "snick_detected": snick_result.get("snick_detected"),
+                "snick_confidence": snick_result.get("snick_confidence"),
+                "snick_timestamp_ms": snick_result.get("snick_timestamp_ms"),
+                "snick_status": snick_result.get("status"),
+                "snick_unavailable_reason": snick_result.get("reason"),
             }
             if normalized_original_decision is not None:
                 result_payload["original_decision"] = normalized_original_decision
@@ -424,6 +636,8 @@ class DetectionService:
             raise HTTPException(status_code=500, detail=str(e))
         finally:
             delete_file(file_path)
+            if extracted_audio_path:
+                delete_file(extracted_audio_path)
 
     @staticmethod
     async def detect_ball(video_file: UploadFile):

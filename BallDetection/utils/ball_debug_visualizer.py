@@ -20,8 +20,8 @@ def draw_trajectory_overlay(
     # 1. Draw Corridor (semi-transparent band)
     if trajectory_model is not None:
         corridor_width = POST_PROCESSOR_CONFIG.get('CORRIDOR_WIDTH_PX', 40)
-        
         predicted_pts = []
+        
         # Calculate predicted points for the entire sequence (up to current frame if specified)
         max_frame = len(ball_infos) if current_frame_idx is None else current_frame_idx + 1
         for i in range(max_frame):
@@ -31,17 +31,41 @@ def draw_trajectory_overlay(
                 
         if len(predicted_pts) > 1:
             # Draw pre-bounce and post-bounce separately if bounce exists
-            if trajectory_model.bounce_frame is not None and 0 <= trajectory_model.bounce_frame < len(predicted_pts):
-                bounce_idx = trajectory_model.bounce_frame
+            bounce_split = getattr(trajectory_model, 'bounce_time', None)
+            if bounce_split is None:
+                bounce_split = trajectory_model.bounce_frame
+            if bounce_split is not None:
+                bounce_idx = int(np.clip(int(np.floor(float(bounce_split))), 0, len(predicted_pts) - 1))
                 pts1 = np.array(predicted_pts[:bounce_idx+1], dtype=np.int32)
                 pts2 = np.array(predicted_pts[bounce_idx:], dtype=np.int32)
                 if len(pts1) > 1:
-                    cv2.polylines(overlay, [pts1], False, (255, 255, 255), thickness=corridor_width*2)
+                    cv2.polylines(
+                        overlay,
+                        [pts1],
+                        False,
+                        (255, 255, 255),
+                        thickness=corridor_width * 2,
+                        lineType=cv2.LINE_AA,
+                    )
                 if len(pts2) > 1:
-                    cv2.polylines(overlay, [pts2], False, (255, 255, 255), thickness=corridor_width*2)
+                    cv2.polylines(
+                        overlay,
+                        [pts2],
+                        False,
+                        (255, 255, 255),
+                        thickness=corridor_width * 2,
+                        lineType=cv2.LINE_AA,
+                    )
             else:
                 pts = np.array(predicted_pts, dtype=np.int32)
-                cv2.polylines(overlay, [pts], False, (255, 255, 255), thickness=corridor_width*2)
+                cv2.polylines(
+                    overlay,
+                    [pts],
+                    False,
+                    (255, 255, 255),
+                    thickness=corridor_width * 2,
+                    lineType=cv2.LINE_AA,
+                )
                 
         # Blend overlay for semi-transparency
         alpha = 0.2
@@ -91,19 +115,29 @@ def draw_trajectory_overlay(
             cv2.circle(output, center, radius, color, 2)
 
     # 3. Draw Bounce Point Indicator
-    if trajectory_model is not None and trajectory_model.bounce_frame is not None:
+    if trajectory_model is not None:
+        bounce_time = getattr(trajectory_model, 'bounce_time', None)
         bounce_frame = trajectory_model.bounce_frame
-        if current_frame_idx is None or bounce_frame <= current_frame_idx:
-            if 0 <= bounce_frame < len(ball_infos) and ball_infos[bounce_frame] is not None:
-                info = ball_infos[bounce_frame]
+        if bounce_time is not None:
+            bounce_idx = int(np.floor(float(bounce_time)))
+        else:
+            bounce_idx = bounce_frame
+
+        if bounce_idx is not None and (current_frame_idx is None or bounce_idx <= current_frame_idx):
+            b_pos = None
+            if bounce_time is not None:
+                b_pos = predict_position(trajectory_model, float(bounce_time))
+            if b_pos is None and 0 <= bounce_idx < len(ball_infos) and ball_infos[bounce_idx] is not None:
+                info = ball_infos[bounce_idx]
                 if 'interpolated_position' in info and info['interpolated_position'] is not None:
                     b_pos = info['interpolated_position']
                 else:
                     box = info.get('box', [0.0, 0.0, 0.0, 0.0])
                     b_pos = (box[0] + box[2] / 2.0, box[1] + box[3] / 2.0)
-                    
+
+            if b_pos is not None:
                 b_pos_int = (int(b_pos[0]), int(b_pos[1]))
-                
+
                 # Special indicator: Big magenta circle with a crosshair
                 cv2.circle(output, b_pos_int, 10, (255, 0, 255), 2)  # Magenta circle
                 cv2.line(output, (b_pos_int[0] - 15, b_pos_int[1]), (b_pos_int[0] + 15, b_pos_int[1]), (255, 0, 255), 2)
