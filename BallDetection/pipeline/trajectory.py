@@ -34,6 +34,37 @@ class TrajectoryModel:
     """Complete trajectory model with multiple segments (pre- and post-bounce)."""
     segments: List[SegmentModel]
     bounce_frame: Optional[int] = None
+    bounce_time: Optional[float] = None
+
+
+def _estimate_bounce_time(sorted_anchors: List[Dict[str, Any]], flip_idx: int) -> Optional[float]:
+    """
+    Estimate the visual bounce time from three anchor points around the sign flip.
+    Uses a quadratic fit on y(t) and returns the vertex time when possible.
+    """
+    if flip_idx < 0 or flip_idx + 2 >= len(sorted_anchors):
+        return None
+
+    window = sorted_anchors[flip_idx:flip_idx + 3]
+    t = np.array([a['frame_idx'] for a in window], dtype=np.float64)
+    y = np.array([a['interpolated_position'][1] for a in window], dtype=np.float64)
+
+    if len(np.unique(t)) < 3:
+        return float(t[1])
+
+    try:
+        coeffs = np.polyfit(t, y, 2)
+    except Exception:
+        return float(t[1])
+
+    a, b, _c = coeffs
+    if abs(a) < 1e-9:
+        return float(t[1])
+
+    bounce_t = -b / (2.0 * a)
+    t_min = float(np.min(t))
+    t_max = float(np.max(t))
+    return float(np.clip(bounce_t, t_min, t_max))
 
 def find_bounce_frame(anchors: List[Dict[str, Any]]) -> Optional[int]:
     """
@@ -66,12 +97,50 @@ def find_bounce_frame(anchors: List[Dict[str, Any]]) -> Optional[int]:
         
         # In image coords: v > 0 is downward, v < 0 is upward
         if v1 > 2.0 and v2 < -2.0:  # Use a threshold to avoid noise
-            # Bounce occurred between t1 and t2
+            bounce_time = _estimate_bounce_time(sorted_anchors, i)
+            if bounce_time is not None:
+                bounce_frame = int(np.floor(bounce_time))
+                logger.info(
+                    f"[TRAJECTORY] Detected bounce near frame {bounce_frame} (t={bounce_time:.2f})"
+                )
+                return bounce_frame
+
+            # Fallback: use the middle anchor when we cannot refine the vertex.
             bounce_frame = sorted_anchors[i+1]['frame_idx']
             logger.info(f"[TRAJECTORY] Detected bounce near frame {bounce_frame}")
             return bounce_frame
             
     return None
+
+
+def find_bounce_event(anchors: List[Dict[str, Any]]) -> Tuple[Optional[int], Optional[float]]:
+    """Return both the display frame and fractional bounce time when a bounce is detected."""
+    if len(anchors) < 3:
+        return None, None
+
+    sorted_anchors = sorted(anchors, key=lambda x: x['frame_idx'])
+
+    velocities = []
+    for i in range(len(sorted_anchors) - 1):
+        a1 = sorted_anchors[i]
+        a2 = sorted_anchors[i + 1]
+        dt = a2['frame_idx'] - a1['frame_idx']
+        if dt == 0:
+            continue
+        dy = a2['interpolated_position'][1] - a1['interpolated_position'][1]
+        vy = dy / dt
+        velocities.append((a1['frame_idx'], vy))
+
+    for i in range(len(velocities) - 1):
+        _t1, v1 = velocities[i]
+        _t2, v2 = velocities[i + 1]
+        if v1 > 2.0 and v2 < -2.0:
+            bounce_time = _estimate_bounce_time(sorted_anchors, i)
+            if bounce_time is not None:
+                return int(np.floor(bounce_time)), bounce_time
+            return sorted_anchors[i + 1]['frame_idx'], float(sorted_anchors[i + 1]['frame_idx'])
+
+    return None, None
 
 def fit_trajectory(anchors: List[Dict[str, Any]]) -> TrajectoryModel:
     """
@@ -81,7 +150,7 @@ def fit_trajectory(anchors: List[Dict[str, Any]]) -> TrajectoryModel:
     if not anchors:
         return TrajectoryModel(segments=[])
 
-    bounce_frame = find_bounce_frame(anchors)
+    bounce_frame, bounce_time = find_bounce_event(anchors)
     
     if bounce_frame is None:
         # Fit a single segment
@@ -89,8 +158,9 @@ def fit_trajectory(anchors: List[Dict[str, Any]]) -> TrajectoryModel:
         return TrajectoryModel(segments=[segment] if segment else [])
     
     # Split anchors based on bounce
-    pre_anchors = [a for a in anchors if a['frame_idx'] < bounce_frame]
-    post_anchors = [a for a in anchors if a['frame_idx'] >= bounce_frame]
+    split_t = bounce_time if bounce_time is not None else float(bounce_frame)
+    pre_anchors = [a for a in anchors if a['frame_idx'] < split_t]
+    post_anchors = [a for a in anchors if a['frame_idx'] >= split_t]
     
     segments = []
     seg_pre = _fit_segment(pre_anchors)
@@ -101,7 +171,7 @@ def fit_trajectory(anchors: List[Dict[str, Any]]) -> TrajectoryModel:
     if seg_post:
         segments.append(seg_post)
         
-    return TrajectoryModel(segments=segments, bounce_frame=bounce_frame)
+    return TrajectoryModel(segments=segments, bounce_frame=bounce_frame, bounce_time=bounce_time)
 
 def _fit_segment(anchors: List[Dict[str, Any]]) -> Optional[SegmentModel]:
     """Helper to fit a single degree-2 polynomial segment."""
@@ -146,7 +216,8 @@ def predict_position(model: TrajectoryModel, frame_idx: int) -> Optional[Tuple[f
     # If frame is before bounce, use first segment. 
     # If after bounce, use the last segment.
     target_segment = model.segments[0]
-    if model.bounce_frame is not None and frame_idx >= model.bounce_frame:
+    bounce_split = model.bounce_time if model.bounce_time is not None else model.bounce_frame
+    if bounce_split is not None and frame_idx >= bounce_split:
         target_segment = model.segments[-1]
     
     # We can also be more precise and pick based on start/end if there are more than 2 segments

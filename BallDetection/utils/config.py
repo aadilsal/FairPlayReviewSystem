@@ -1,7 +1,10 @@
 DETECTION_CONFIG = {
-    'model1_path': 'weights/ball-yolov8s.pt',  # High Precision (Model A)
-    'model2_path': 'weights/yolov8_cricket_ball2/weights/best.pt',  # High Recall (Model B)
-    'conf_threshold': 0.2,
+    'model2_path': 'weights/yolov8_cricket_ball2/weights/best.pt',  # High Precision (Model A)
+    # PRIOTITY for model 2:
+    # 1.weights/yolov8_cricket_ball2/weights/best.pt
+    # 2.weights/ball-yolov8s.pt
+    'model1_path': 'weights/ball_weights_new.pt',  # High Recall (Model B)
+    'conf_threshold': 0.05,
     'iou_threshold': 0.1
 }
 
@@ -10,7 +13,7 @@ FILTERS_CONFIG = {
     'ball_color': 'white',
     'color_threshold': 0.2,
     'enable_area_filter': True,
-    'min_area': 250,
+    'min_area': 100,
     'max_area': 8000,
     'enable_aspect_ratio_filter': True,
     'aspect_ratio_min': 0.5,

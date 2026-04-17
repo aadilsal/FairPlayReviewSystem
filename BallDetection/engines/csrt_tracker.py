@@ -6,13 +6,6 @@ from BallDetection.utils.config import POST_PROCESSOR_CONFIG
 
 logger = logging.getLogger(__name__)
 
-
-def _box_center(box):
-    if not box or len(box) < 4:
-        return None
-    x, y, w, h = box[:4]
-    return (float(x + w / 2.0), float(y + h / 2.0))
-
 def _create_csrt_tracker():
     """Factory function for the OpenCV CSRT Tracker."""
     # Sometimes cv2.TrackerCSRT_create is under cv2.legacy
@@ -171,10 +164,9 @@ def agree_and_merge(forward_res: Dict[int, Dict], backward_res: Dict[int, Dict],
                     (f_box[2] + b_box[2]) / 2.0,
                     (f_box[3] + b_box[3]) / 2.0
                 ]
-                center = _box_center(avg_box)
                 merged[f] = {
                     'box': avg_box,
-                    'interpolated_position': center,
+                    'interpolated_position': (avg_box[0], avg_box[1]),
                     'source': 'csrt-agreed'
                 }
             elif gap_type == 'occlusion' and dist > edge_thresh:
@@ -187,10 +179,9 @@ def agree_and_merge(forward_res: Dict[int, Dict], backward_res: Dict[int, Dict],
                     (f_box[2] + b_box[2]) / 2.0,
                     (f_box[3] + b_box[3]) / 2.0
                 ]
-                center = _box_center(avg_box)
                 merged[f] = {
                     'box': avg_box,
-                    'interpolated_position': center,
+                    'interpolated_position': (avg_box[0], avg_box[1]),
                     'source': 'edge-suspected',
                     'f_box': f_box,
                     'b_box': b_box
@@ -198,25 +189,22 @@ def agree_and_merge(forward_res: Dict[int, Dict], backward_res: Dict[int, Dict],
                 logger.warning(f"[CSRT] Tracker disagreement > {edge_thresh}px at frame {f} during occlusion. Tagged 'edge-suspected'.")
             else:
                 # Disagreement but not an edge case. Just pick forward as default if valid.
-                center = _box_center(f_box)
                 merged[f] = {
                     'box': f_box,
-                    'interpolated_position': center,
+                    'interpolated_position': (f_box[0], f_box[1]),
                     'source': 'csrt-forward'
                 }
         
         elif has_f:
-            center = _box_center(f_data['box'])
             merged[f] = {
                 'box': f_data['box'],
-                'interpolated_position': center,
+                'interpolated_position': (f_data['box'][0], f_data['box'][1]),
                 'source': 'csrt-forward'
             }
         elif has_b:
-            center = _box_center(b_data['box'])
             merged[f] = {
                 'box': b_data['box'],
-                'interpolated_position': center,
+                'interpolated_position': (b_data['box'][0], b_data['box'][1]),
                 'source': 'csrt-backward'
             }
             

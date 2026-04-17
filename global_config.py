@@ -1,16 +1,24 @@
 GLOBAL_CONFIG = {
-    'imgsz': 1280,
+    'imgsz': 2560,
     'enable_preprocessing': False,
     'display_frames': True,
     'enable_deblur': False,
     'enable_sharpen': False,
     'enable_clahe': False,
     'blur_threshold': 100.0,
-    'fps': 30,
+    'fps': 60,
     'person_conf': 0.5,
     'bat_conf': 0.1,
     'iou_thresh': 0.05,
     'consec_frames': 3,
     'wicket_conf': 0.25,
-    'pad_conf': 0.3
+    'pad_conf': 0.3,
+    'snick_low_hz': 1200,
+    'snick_high_hz': 6500,
+    'snick_peak_prominence': 2.5,
+    'snick_align_window_ms': 80,
+    'snick_visual_weight': 0.45,
+    'snick_audio_weight': 0.55,
+    'snick_detect_threshold': 0.62,
+    'snick_low_threshold': 0.30
 }
