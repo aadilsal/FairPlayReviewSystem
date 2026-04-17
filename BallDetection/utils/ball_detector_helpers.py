@@ -6,18 +6,42 @@ from BallDetection.core.validator import filter_and_select_ball_detection
 
 logger = logging.getLogger(__name__)
 
+
+def _box_center(box):
+    if not box or len(box) < 4:
+        return None
+    x, y, w, h = box[:4]
+    return (float(x + w / 2.0), float(y + h / 2.0))
+
+
+def _inc_rejection(detector_instance, reason: str) -> None:
+    stats = getattr(detector_instance, 'rejection_stats', None)
+    if isinstance(stats, dict):
+        stats[reason] = int(stats.get(reason, 0)) + 1
+
+
+def _confidence_ok(info, min_conf: float) -> bool:
+    if not info:
+        return False
+    return float(info.get('conf', 0.0)) >= float(min_conf)
+
 def handle_scanning_state(detector_instance, frame):
     """Initial search across the full frame."""
     yolo_detections = yolo_detect_ball(detector_instance.detector, frame)
     current_ball_info = filter_and_select_ball_detection(frame, yolo_detections)
     
-    if current_ball_info:
+    if current_ball_info and _confidence_ok(current_ball_info, STATE_CONFIG.get('SCANNING_MIN_CONF', 0.15)):
         detector_instance.validation_counter = 1
         detector_instance.last_box = current_ball_info['box']
         # Initialize Kalman at detected spot
-        detector_instance.kalman.reset(np.array(detector_instance.last_box[:2]))
+        center = _box_center(detector_instance.last_box)
+        if center is not None:
+            detector_instance.kalman.reset(np.array(center))
         detector_instance.state = detector_instance.STATE_VALIDATING
-        logger.info(f"[SCANNING] Candidate at {detector_instance.last_box[:2]}")
+        logger.info(f"[SCANNING] Candidate at {center or detector_instance.last_box[:2]}")
+    elif current_ball_info:
+        _inc_rejection(detector_instance, 'scanning_low_conf')
+        current_ball_info = None
     
     return current_ball_info
 
@@ -26,19 +50,37 @@ def handle_validating_state(detector_instance, frame):
     yolo_detections = yolo_detect_ball(detector_instance.detector, frame)
     current_ball_info = filter_and_select_ball_detection(frame, yolo_detections)
 
-    if current_ball_info:
-        detector_instance.kalman.predict_next()
-        detector_instance.validation_counter += 1
-        detector_instance.last_box = current_ball_info['box']
-        detector_instance.kalman.update(np.array(detector_instance.last_box[:2]))
-
-        if detector_instance.validation_counter >= STATE_CONFIG['VALIDATION_FRAMES']:
-            detector_instance.state = detector_instance.STATE_TRACKING
-            detector_instance.miss_streak = 0
-            logger.info("[VALIDATING] Confirmed. Switching to TRACKING.")
-    else:
+    if current_ball_info is None:
         logger.info("[VALIDATING] Lost candidate. Resetting.")
         detector_instance.reset()
+        return current_ball_info
+
+    if not _confidence_ok(current_ball_info, STATE_CONFIG.get('VALIDATION_MIN_CONF', 0.15)):
+        _inc_rejection(detector_instance, 'validating_low_conf')
+        logger.info("[VALIDATING] Rejected low-confidence candidate. Resetting.")
+        detector_instance.reset()
+        return None
+
+    prev_center = _box_center(getattr(detector_instance, 'last_box', None))
+    curr_center = _box_center(current_ball_info.get('box'))
+    if prev_center is not None and curr_center is not None:
+        jump_px = float(np.hypot(curr_center[0] - prev_center[0], curr_center[1] - prev_center[1]))
+        if jump_px > float(STATE_CONFIG.get('MAX_VALIDATION_JUMP_PX', 90.0)):
+            _inc_rejection(detector_instance, 'validating_jump')
+            logger.info("[VALIDATING] Rejected jump %.1fpx. Resetting.", jump_px)
+            detector_instance.reset()
+            return None
+
+    detector_instance.kalman.predict_next()
+    detector_instance.validation_counter += 1
+    detector_instance.last_box = current_ball_info['box']
+    if curr_center is not None:
+        detector_instance.kalman.update(np.array(curr_center))
+
+    if detector_instance.validation_counter >= STATE_CONFIG['VALIDATION_FRAMES']:
+        detector_instance.state = detector_instance.STATE_TRACKING
+        detector_instance.miss_streak = 0
+        logger.info("[VALIDATING] Confirmed. Switching to TRACKING.")
     
     return current_ball_info
 
@@ -71,7 +113,24 @@ def handle_tracking_state(detector_instance, frame):
 
     # 4. Update or Ghost
     if current_ball_info:
-        detector_instance.kalman.update(np.array(current_ball_info['box'][:2]))
+        if not _confidence_ok(current_ball_info, STATE_CONFIG.get('TRACKING_MIN_CONF', 0.08)):
+            _inc_rejection(detector_instance, 'tracking_low_conf')
+            current_ball_info = None
+
+    if current_ball_info:
+        center = _box_center(current_ball_info['box'])
+        pred_center = (float(pred_x), float(pred_y))
+        if center is not None:
+            jump_px = float(np.hypot(center[0] - pred_center[0], center[1] - pred_center[1]))
+            if jump_px > float(STATE_CONFIG.get('MAX_TRACKING_JUMP_PX', 120.0)):
+                _inc_rejection(detector_instance, 'tracking_jump')
+                center = None
+                current_ball_info = None
+
+    if current_ball_info:
+        center = _box_center(current_ball_info['box'])
+        if center is not None:
+            detector_instance.kalman.update(np.array(center))
         detector_instance.last_box = current_ball_info['box']
         detector_instance.miss_streak = 0
     else:
@@ -98,8 +157,16 @@ def finalize_detection_result(detector_instance, current_ball_info, roi_debug_bo
     """Processes final metadata and history logging."""
     detector_instance.last_ball_info = current_ball_info
     
-    kf_pos = detector_instance.kalman.kf.x[:2]
-    detector_instance.last_ball_info['interpolated_position'] = (float(kf_pos[0]), float(kf_pos[1]))
+    if detector_instance.last_ball_info.get('ghost', False):
+        kf_pos = detector_instance.kalman.kf.x[:2]
+        detector_instance.last_ball_info['interpolated_position'] = (float(kf_pos[0]), float(kf_pos[1]))
+    else:
+        center = _box_center(detector_instance.last_ball_info.get('box'))
+        if center is not None:
+            detector_instance.last_ball_info['interpolated_position'] = center
+        else:
+            kf_pos = detector_instance.kalman.kf.x[:2]
+            detector_instance.last_ball_info['interpolated_position'] = (float(kf_pos[0]), float(kf_pos[1]))
     
     if roi_debug_box:
         detector_instance.last_ball_info['roi_box'] = roi_debug_box
