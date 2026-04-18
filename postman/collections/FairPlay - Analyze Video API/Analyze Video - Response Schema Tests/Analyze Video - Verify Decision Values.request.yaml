@@ -1,0 +1,68 @@
+$kind: http-request
+name: 'Analyze Video - Verify Decision Values'
+method: POST
+url: '{{baseUrl}}/api/analyze-video'
+order: 1000
+queryParams:
+  - key: match_id
+    value: '{{matchId}}'
+body:
+  type: formdata
+  content:
+    - key: video_file
+      type: file
+      src: ''
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 200", function () {
+          pm.response.to.have.status(200);
+      });
+
+      pm.test("data.decision is OUT or NOT OUT", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.decision).to.be.oneOf(["OUT", "NOT OUT"]);
+      });
+
+      pm.test("data.impact is In-line or Outside", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.impact).to.be.oneOf(["In-line", "Outside"]);
+      });
+
+      pm.test("data.pitch is In-line or Outside", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.pitch).to.be.oneOf(["In-line", "Outside"]);
+      });
+
+      pm.test("data.wickets is Hitting or Missing", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.wickets).to.be.oneOf(["Hitting", "Missing"]);
+      });
+
+      pm.test("data.confidence is a number between 0 and 1", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.confidence).to.be.a("number");
+          pm.expect(jsonData.data.confidence).to.be.at.least(0);
+          pm.expect(jsonData.data.confidence).to.be.at.most(1);
+      });
+
+      pm.test("data.summary_stats.total_frames is a number", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.summary_stats.total_frames).to.be.a("number");
+      });
+
+      pm.test("data.summary_stats.frames_with_ball is a number", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.summary_stats.frames_with_ball).to.be.a("number");
+      });
+
+      pm.test("data.summary_stats.frames_with_batsman is a number", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.summary_stats.frames_with_batsman).to.be.a("number");
+      });
+
+      pm.test("data.summary_stats.frames_with_wicket is a number", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.summary_stats.frames_with_wicket).to.be.a("number");
+      });

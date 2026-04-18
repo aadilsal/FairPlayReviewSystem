@@ -1,0 +1,76 @@
+from fastapi import APIRouter, UploadFile, File, Depends, Form
+from typing import Literal
+import logging
+from API.services.detection_service import DetectionService
+from API.utils.response_formatter import success_response
+from API.dependencies.auth_dependency import get_current_user
+from API.schemas.detection_schemas import AnalyzeVideoResult, AnalyzeVideoSuccessResponse
+
+router = APIRouter()
+logger = logging.getLogger("fairplay.api.detection")
+
+@router.post("/analyze-video", response_model=AnalyzeVideoSuccessResponse)
+async def analyze_video(
+    match_id: int,
+    video_file: UploadFile = File(...),
+    original_decision: Literal["OUT", "NOT OUT"] = Form(...),
+    person_conf: float = 0.5,
+    bat_conf: float = 0.1,
+    pad_conf: float = 0.1,
+    iou_thresh: float = 0.05,
+    consec_frames: int = 3,
+    wicket_conf: float = 0.25,
+    preprocess: bool = True,
+    fps: int = 15,
+    display: bool = False,
+    current_user=Depends(get_current_user),
+):
+    logger.info(
+        "Analyze video request by user_id=%s for match_id=%s file=%s",
+        current_user["id"],
+        match_id,
+        video_file.filename
+    )
+    result = await DetectionService.analyze_video(
+        match_id=match_id,
+        user_id=current_user["id"],
+        original_decision=original_decision,
+        video_file=video_file,
+        person_conf=person_conf,
+        bat_conf=bat_conf,
+        pad_conf=pad_conf,
+        iou_thresh=iou_thresh,
+        consec_frames=consec_frames,
+        wicket_conf=wicket_conf,
+        preprocess=preprocess,
+        fps=fps,
+        display=display,
+    )
+    logger.info("Analyze video completed for match_id=%s", match_id)
+    analyzed = AnalyzeVideoResult.parse_obj(result.result)
+    return {
+        "status": "success",
+        "data": analyzed,
+        "message": "Video analyzed",
+    }
+
+@router.post("/detect/ball")
+async def detect_ball(video_file: UploadFile = File(...), current_user=Depends(get_current_user)):
+    logger.info("Ball detection request by user_id=%s file=%s", current_user["id"], video_file.filename)
+    result = await DetectionService.detect_ball(video_file)
+    logger.info("Ball detection completed for user_id=%s", current_user["id"])
+    return success_response(data=result.result, message="Ball detection complete")
+
+@router.post("/detect/batsman")
+async def detect_batsman(video_file: UploadFile = File(...), current_user=Depends(get_current_user)):
+    logger.info("Batsman detection request by user_id=%s file=%s", current_user["id"], video_file.filename)
+    result = await DetectionService.detect_batsman(video_file)
+    logger.info("Batsman detection completed for user_id=%s", current_user["id"])
+    return success_response(data=result.result, message="Batsman detection complete")
+
+@router.post("/detect/wicket")
+async def detect_wicket(video_file: UploadFile = File(...), current_user=Depends(get_current_user)):
+    logger.info("Wicket detection request by user_id=%s file=%s", current_user["id"], video_file.filename)
+    result = await DetectionService.detect_wicket(video_file)
+    logger.info("Wicket detection completed for user_id=%s", current_user["id"])
+    return success_response(data=result.result, message="Wicket detection complete")

@@ -1,0 +1,23 @@
+$kind: http-request
+name: 'Analyze Video - Missing match_id'
+method: POST
+url: '{{baseUrl}}/api/analyze-video'
+order: 1000
+body:
+  type: formdata
+  content:
+    - key: video_file
+      type: file
+      src: ''
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 422", function () {
+          pm.response.to.have.status(422);
+      });
+
+      pm.test("Response JSON has status equal to error", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.status).to.eql("error");
+      });

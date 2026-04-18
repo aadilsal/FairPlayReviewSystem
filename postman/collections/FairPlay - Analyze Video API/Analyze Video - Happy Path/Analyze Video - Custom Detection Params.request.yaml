@@ -1,0 +1,43 @@
+$kind: http-request
+name: 'Analyze Video - Custom Detection Params'
+method: POST
+url: '{{baseUrl}}/api/analyze-video'
+order: 2000
+queryParams:
+  - key: match_id
+    value: '{{matchId}}'
+  - key: person_conf
+    value: '0.6'
+  - key: bat_conf
+    value: '0.2'
+  - key: iou_thresh
+    value: '0.1'
+  - key: consec_frames
+    value: '5'
+  - key: wicket_conf
+    value: '0.3'
+  - key: fps
+    value: '25'
+body:
+  type: formdata
+  content:
+    - key: video_file
+      type: file
+      src: ''
+scripts:
+  - type: afterResponse
+    language: text/javascript
+    code: |-
+      pm.test("Status code is 200", function () {
+          pm.response.to.have.status(200);
+      });
+
+      pm.test("Response JSON has data.status equal to completed", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.status).to.eql("completed");
+      });
+
+      pm.test("Response JSON has data.frame_count greater than 0", function () {
+          var jsonData = pm.response.json();
+          pm.expect(jsonData.data.frame_count).to.be.above(0);
+      });

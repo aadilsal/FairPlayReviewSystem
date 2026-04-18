@@ -1,0 +1,14 @@
+$kind: collection
+name: FairPlay - Analyze Video API
+variables:
+  - key: baseUrl
+    value: 'http://localhost:8000'
+  - key: authToken
+    value: ''
+  - key: matchId
+    value: '1'
+auth:
+  type: bearer
+  credentials:
+    - key: token
+      value: '{{authToken}}'
