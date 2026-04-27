@@ -2,14 +2,19 @@ import cv2
 import json
 import os
 import re
+import os
+import re
 import numpy as np
+import logging
 import logging
 
 from BallDetection.pipeline.ball_detector import detect_ball
 from BallDetection.pipeline.trajectory import fit_trajectory
+from BallDetection.pipeline.trajectory import fit_trajectory
 from pose_estimator import estimate_pose
 from person_detector import detect_persons
 from pad_detector import detect_pads
+from bat_detector import detect_bat
 from bat_detector import detect_bat
 from Batsman_finder import BatsmanFinder
 from Batsman_tracker import BatsmanTracker
@@ -136,6 +141,7 @@ def process_frames_pipeline(
         if clean_frame is None:
             print(f"[WARN] Could not read {frame_path}")
             all_ball_infos.append(None)
+            all_ball_infos.append(None)
             continue
 
         if preprocess:
@@ -197,12 +203,14 @@ def process_frames_pipeline(
                 frame_idx
             )
 
+
             if finder_meta.get("batsman_confirmed", False):
                 bbox = finder_meta["batsman_bbox"]
                 if batsman_tracker.init_tracker(frame, bbox):
                     tracking_active = True
                     metadata["tracking_active"] = True
                     det_batsman_box = list(map(int, bbox))
+                    logger.info("Batsman confirmed at frame %s", frame_idx)
                     logger.info("Batsman confirmed at frame %s", frame_idx)
         else:
             ok, bbox = batsman_tracker.update(frame.copy())
@@ -212,10 +220,12 @@ def process_frames_pipeline(
                 metadata["detections"].append({"label": "Batsman", "box": det_batsman_box, "tracked": True})
             else:
                 logger.warning("Tracker lost at frame %s", frame_idx)
+                logger.warning("Tracker lost at frame %s", frame_idx)
                 tracking_active = False
                 batsman_finder = BatsmanFinder(iou_thresh=iou_thresh, consec_required=consec_required)
                 batsman_tracker = BatsmanTracker()
 
+        if det_batsman_box:
         if det_batsman_box:
             _, kps = estimate_pose(frame.copy(), bbox=det_batsman_box)
             # Keep only the pose that best corresponds to the batsman box.
@@ -469,3 +479,4 @@ def process_frames_pipeline(
 
     logger.info("Pipeline completed for %s frames", n_paths)
     cv2.destroyAllWindows()
+
