@@ -219,6 +219,59 @@ def _insert_review(
     return resp.data[0]
 
 
+def _get_latest_review(*, match_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+    resp = (
+        supabase_client.table(REVIEWS_TABLE)
+        .select("id, video_uri, created_at")
+        .eq("match_id", match_id)
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    row = (resp.data or [None])[0]
+    return row if isinstance(row, dict) else None
+
+
+def _update_review(
+    *,
+    review_id: int,
+    video_object_path: str,
+    content: Optional[str],
+    analysis: Optional[str],
+    original_decision: Optional[str],
+    derived_fields: Dict[str, Any],
+) -> Dict[str, Any]:
+    patch: Dict[str, Any] = {"video_uri": video_object_path}
+    if content is not None:
+        patch["content"] = (content or "").strip() or "Review submitted"
+    if analysis is not None:
+        patch["analysis"] = analysis
+    if original_decision is not None:
+        patch["original_decision"] = original_decision
+    patch.update({k: v for k, v in (derived_fields or {}).items() if v is not None})
+
+    resp = supabase_client.table(REVIEWS_TABLE).update(patch).eq("id", review_id).execute()
+    if not resp.data:
+        raise RuntimeError("Failed to update review row (empty response)")
+    return resp.data[0]
+
+
+def _delete_storage_object(object_path: Optional[str]) -> None:
+    p = (object_path or "").strip()
+    if not p:
+        return
+    # If a legacy full URL is stored, do not attempt delete (we only delete object-paths).
+    if p.lower().startswith("http://") or p.lower().startswith("https://"):
+        return
+    storage = _write_client().storage.from_(REVIEW_VIDEOS_BUCKET)
+    try:
+        storage.remove([p])
+    except Exception:
+        # Best-effort cleanup; do not fail the whole operation.
+        return
+
+
 def _parse_summary_json(local_summary_json: Path) -> Tuple[Dict[str, Any], bytes]:
     raw_bytes = local_summary_json.read_bytes()
     try:
@@ -301,6 +354,16 @@ def main() -> None:
     parser.add_argument("--content", type=str, default="LBW review video attached")
     parser.add_argument("--analysis", type=str, default=None)
     parser.add_argument("--original-decision", type=str, default=None, help="Optional: OUT / NOT OUT")
+    parser.add_argument(
+        "--replace-latest",
+        action="store_true",
+        help="Replace latest review video for this user+match instead of inserting a new review row.",
+    )
+    parser.add_argument(
+        "--delete-old",
+        action="store_true",
+        help="When used with --replace-latest, delete the previously referenced storage object (best effort).",
+    )
     args = parser.parse_args()
 
     # Ensure imports work when running from repo root.
@@ -327,16 +390,42 @@ def main() -> None:
     match_row = _ensure_match_fields(match_id=match_id, user_id=user_id)
     match_name = (match_row.get("name") or match_row.get("teams") or f"Match {match_id}").strip()
 
-    review = _insert_review(
-        match_id=match_id,
-        user_id=user_id,
-        match_name=match_name,
-        video_object_path=artifacts.video_object_path,
-        content=args.content,
-        analysis=args.analysis,
-        original_decision=args.original_decision,
-        derived_fields=derived_fields,
-    )
+    if args.replace_latest:
+        latest = _get_latest_review(match_id=match_id, user_id=user_id)
+        if latest and latest.get("id") is not None:
+            old_video_uri = latest.get("video_uri")
+            review = _update_review(
+                review_id=int(latest["id"]),
+                video_object_path=artifacts.video_object_path,
+                content=args.content,
+                analysis=args.analysis,
+                original_decision=args.original_decision,
+                derived_fields=derived_fields,
+            )
+            if args.delete_old:
+                _delete_storage_object(str(old_video_uri) if old_video_uri is not None else None)
+        else:
+            review = _insert_review(
+                match_id=match_id,
+                user_id=user_id,
+                match_name=match_name,
+                video_object_path=artifacts.video_object_path,
+                content=args.content,
+                analysis=args.analysis,
+                original_decision=args.original_decision,
+                derived_fields=derived_fields,
+            )
+    else:
+        review = _insert_review(
+            match_id=match_id,
+            user_id=user_id,
+            match_name=match_name,
+            video_object_path=artifacts.video_object_path,
+            content=args.content,
+            analysis=args.analysis,
+            original_decision=args.original_decision,
+            derived_fields=derived_fields,
+        )
 
     detection_result = _upsert_detection_result(
         match_id=match_id,
