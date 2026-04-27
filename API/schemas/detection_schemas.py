@@ -23,6 +23,11 @@ class AnalyzeVideoResult(BaseModel):
     original_decision: Optional[LbwDecision] = None
     confidence: Optional[float] = None
     review_outcome: Optional[Literal["inconclusive"]] = None
+    snick_detected: Optional[bool] = None
+    snick_confidence: Optional[float] = None
+    snick_timestamp_ms: Optional[float] = None
+    snick_status: Optional[str] = None
+    snick_unavailable_reason: Optional[str] = None
 
     class Config:
         extra = "allow"

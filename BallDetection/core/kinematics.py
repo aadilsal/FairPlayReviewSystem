@@ -13,41 +13,50 @@ def project_position(trajectory_model: TrajectoryModel, frame_idx: int) -> Optio
     """
     return predict_position(trajectory_model, frame_idx)
 
-def find_edge_intersection(forward_model, backward_model, gap_range: Tuple[int, int]) -> Optional[Tuple[float, float]]:
+def find_edge_intersection(forward_model, backward_model, gap_range: Optional[Tuple[int, int]] = None) -> Optional[Tuple[float, float]]:
     """
-    Finds the intersection of two parabolic arcs (quadratic segment models) for occlusion gaps.
-    Args:
-        forward_model: SegmentModel for the forward arc (with .a, .b, .c coefficients)
-        backward_model: SegmentModel for the backward arc (with .a, .b, .c coefficients)
-        gap_range: (start_frame, end_frame) tuple for the occlusion gap
-    Returns:
-        (x, y) intersection point, or midpoint average if no real intersection.
+    Resolves an occlusion edge using the available forward/backward track samples.
+
+    The current post-processing layer passes point lists, so this helper accepts
+    either sequences of (x, y) samples or model-like objects with evaluate().
     """
-    # Extract quadratic coefficients
-    a1, b1, c1 = forward_model.a, forward_model.b, forward_model.c
-    a2, b2, c2 = backward_model.a, backward_model.b, backward_model.c
-    start_frame, end_frame = gap_range
-    gap_mid = (start_frame + end_frame) / 2
 
-    # Solve (a1-a2)t^2 + (b1-b2)t + (c1-c2) = 0
-    coeffs = [a1 - a2, b1 - b2, c1 - c2]
-    roots = np.roots(coeffs)
-    real_roots = [r.real for r in roots if np.isreal(r)]
+    def _as_point_sequence(source, prefer_last: bool) -> List[Tuple[float, float]]:
+        points: List[Tuple[float, float]] = []
 
-    # Select root(s) within gap range
-    valid_roots = [t for t in real_roots if start_frame <= t <= end_frame]
+        if source is None:
+            return points
 
-    if not valid_roots:
-        # No intersection: fallback to midpoint average
-        logger.warning("[KINEMATICS] No real intersection found, using midpoint average.")
-        x1, y1 = forward_model.evaluate(gap_mid)
-        x2, y2 = backward_model.evaluate(gap_mid)
-        return ((x1 + x2) / 2, (y1 + y2) / 2)
+        if isinstance(source, (list, tuple, np.ndarray)):
+            for item in source:
+                if item is None or not isinstance(item, (list, tuple, np.ndarray)):
+                    continue
+                if len(item) < 2:
+                    continue
+                points.append((float(item[0]), float(item[1])))
+            return points
 
-    # If multiple valid roots, pick closest to gap midpoint
-    t_star = min(valid_roots, key=lambda t: abs(t - gap_mid))
+        if hasattr(source, "evaluate") and gap_range is not None:
+            start_frame, end_frame = gap_range
+            t_star = (start_frame + end_frame) / 2.0
+            x_val, y_val = source.evaluate(t_star)
+            return [(float(x_val), float(y_val))]
 
-    # Evaluate both models at t_star and average
-    x1, y1 = forward_model.evaluate(t_star)
-    x2, y2 = backward_model.evaluate(t_star)
-    return ((x1 + x2) / 2, (y1 + y2) / 2)
+        if hasattr(source, "x_coeffs") and hasattr(source, "y_coeffs") and gap_range is not None:
+            start_frame, end_frame = gap_range
+            t_star = (start_frame + end_frame) / 2.0
+            x_val = np.polyval(source.x_coeffs, t_star)
+            y_val = np.polyval(source.y_coeffs, t_star)
+            return [(float(x_val), float(y_val))]
+
+        return points
+
+    forward_points = _as_point_sequence(forward_model, prefer_last=True)
+    backward_points = _as_point_sequence(backward_model, prefer_last=False)
+
+    if not forward_points or not backward_points:
+        return None
+
+    fx, fy = forward_points[-1]
+    bx, by = backward_points[0]
+    return ((fx + bx) / 2.0, (fy + by) / 2.0)

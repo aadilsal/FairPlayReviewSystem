@@ -8,6 +8,8 @@ import logging
 import time
 import uuid
 from API.routes import auth_routes, match_routes, review_routes, notification_routes, profile_routes, detection_routes, health_routes, video_proxy_routes
+from API.core.config import settings
+from utils.audio_extractor import is_ffmpeg_available
 
 app = FastAPI(
     title="FairPlayReviewSystem API",
@@ -23,6 +25,15 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 )
 logger = logging.getLogger("fairplay.api")
+
+
+@app.on_event("startup")
+async def startup_diagnostics():
+    ffmpeg_ok = is_ffmpeg_available(settings.FFMPEG_BINARY or None)
+    if ffmpeg_ok:
+        logger.info("Startup diagnostics: ffmpeg available for snick detection")
+    else:
+        logger.warning("Startup diagnostics: ffmpeg not available, snick detection will run in fallback mode")
 
 # CORS Middleware
 app.add_middleware(

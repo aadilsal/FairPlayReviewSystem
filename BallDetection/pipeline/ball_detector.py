@@ -28,6 +28,7 @@ class BallDetector:
         self.last_ball_info = None
         self.last_box = None
         self.history = []
+        self.rejection_stats = {}
 
         # Crop state (computed once on first frame, persists across reset())
         self.crop_initialized = False

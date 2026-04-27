@@ -1,6 +1,13 @@
 import numpy as np
 from filterpy.kalman import KalmanFilter
 
+
+def _box_center(box):
+    if not box or len(box) < 4:
+        return None
+    x, y, w, h = box[:4]
+    return (float(x + w / 2.0), float(y + h / 2.0))
+
 class BallKalmanInterpolator:
     def __init__(self):
         self.kf = KalmanFilter(dim_x=4, dim_z=2)
@@ -55,7 +62,8 @@ def interpolate_trajectory(ball_infos):
     trajectory = []
     for info in ball_infos:
         if info and 'box' in info:
-            trajectory.append({'position': info['box'][:2]})
+            center = _box_center(info['box'])
+            trajectory.append({'position': center})
         else:
             trajectory.append({'position': None})
     interpolator = BallKalmanInterpolator()
@@ -83,23 +91,24 @@ def segment_aware_smooth(ball_infos, bounce_frame):
             interpolator.reset()
             
         pos = None
-        if info is not None:
-            if 'interpolated_position' in info:
+        if info is not None and not info.get('ghost', False):
+            if 'interpolated_position' in info and info['interpolated_position'] is not None:
                 pos = info['interpolated_position']
             elif 'box' in info:
-                pos = info['box'][:2]
+                pos = _box_center(info['box'])
 
         if pos is not None:
             if interpolator.initialized:
                 interpolator.predict_next()
             interpolator.update(np.array(pos))
+            interpolated.append((float(pos[0]), float(pos[1])))
+            continue
+
+        if interpolator.initialized:
+            interpolator.predict_next()
+            interp = interpolator.kf.x[:2]
+            interpolated.append((float(interp[0]), float(interp[1])))
         else:
-            if interpolator.initialized:
-                interpolator.predict_next()
-                
-        # If still not initialized (e.g. leading Nones), we just use 0,0 or None
-        # But we'll follow the original interpolator's return format
-        interp = interpolator.kf.x[:2]
-        interpolated.append((float(interp[0]), float(interp[1])))
+            interpolated.append(None)
         
     return interpolated

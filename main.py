@@ -13,6 +13,7 @@ sys.path.append(os.path.join(current_dir, "BatsmanDetection"))
 sys.path.append(os.path.join(current_dir, "WicketDetection"))
 sys.path.append(os.path.join(current_dir, "Pipeline"))
 sys.path.append(os.path.join(current_dir, "utils"))
+sys.path.append(os.path.join(current_dir, "LbwDecision"))
 
 try:
     from frame_extractor import extract_video_frames
@@ -34,7 +35,26 @@ def main():
     parser.add_argument('--consec-frames', type=int, default=GLOBAL_CONFIG.get('consec_frames'), help='Consecutive frames required to lock batsman (default: 3)')
     parser.add_argument('--wicket-conf', type=float, default=GLOBAL_CONFIG.get('wicket_conf'), help='Wicket detection confidence (default: 0.25)')
     parser.add_argument('--pad-conf', type=float, default=GLOBAL_CONFIG.get('pad_conf'), help='Pad detection confidence (default: 0.3)')
+    parser.add_argument(
+        '--disable-dynamic-wicket',
+        action='store_true',
+        help='Disable per-frame dynamic wicket detection for CLI runs (default: off).',
+    )
+    parser.add_argument(
+        '--enable-dynamic-wicket',
+        action='store_true',
+        help='Explicitly enable per-frame dynamic wicket detection for CLI runs.',
+    )
     args = parser.parse_args()
+
+    if args.disable_dynamic_wicket and args.enable_dynamic_wicket:
+        print("[ERROR] Choose only one of --disable-dynamic-wicket or --enable-dynamic-wicket")
+        return
+
+    # CLI policy: disable dynamic wicket detection by default to avoid unstable wicket tracks.
+    dynamic_wicket_detection = args.enable_dynamic_wicket
+    if args.disable_dynamic_wicket:
+        dynamic_wicket_detection = False
 
     # validate input file exists
     if not os.path.exists(args.input):
@@ -66,6 +86,7 @@ def main():
     print(f"  - Consecutive frames required: {args.consec_frames}")
     print(f"  - Wicket confidence: {args.wicket_conf}")
     print(f"  - Pad confidence: {args.pad_conf}")
+    print(f"  - Dynamic wicket detection: {'ON' if dynamic_wicket_detection else 'OFF'}")
 
 
     process_frames_pipeline(
@@ -78,6 +99,7 @@ def main():
         wicket_conf=args.wicket_conf,
         preprocess=GLOBAL_CONFIG['enable_preprocessing'],
         display=GLOBAL_CONFIG['display_frames'],
+        dynamic_wicket_detection=dynamic_wicket_detection,
         video_stem=video_name_stem,
     )
 

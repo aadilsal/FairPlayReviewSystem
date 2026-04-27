@@ -117,49 +117,65 @@ def visualize_pads(det_pads, vis_frame, show_feet=False, use_union=True):
         cv2.putText(vis_frame, p["label"], (px, max(0, py - 5)), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
 
-def visualize_ball(det_ball, vis_frame, frame_idx):
-    if not det_ball or frame_idx >= len(det_ball):
-        return
-        
-    color_map = {
-        'yolo': (0, 255, 0),         # Green
-        'yolo-rescue': (0, 255, 255), # Yellow
-        'csrt-agreed': (255, 255, 0), # Cyan
-        'kinematic': (0, 0, 255)      # Red
-    }
 
-    prev_pos = None
+def _ball_center(info):
+    if not info:
+        return None
+    pos = info.get('interpolated_position')
+    if pos is not None and len(pos) >= 2:
+        return (float(pos[0]), float(pos[1]))
+    box = info.get('box')
+    if box and len(box) >= 4:
+        return (float(box[0] + box[2] / 2.0), float(box[1] + box[3] / 2.0))
+    return None
 
-    for i in range(frame_idx + 1):
+
+def _indexed_ball_points(det_ball, upto_frame_idx):
+    pts = []
+    if not det_ball:
+        return pts
+    last = min(int(upto_frame_idx), len(det_ball) - 1)
+    for i in range(0, last + 1):
         info = det_ball[i]
         if info is None or info.get('ghost', False):
             continue
+        center = _ball_center(info)
+        if center is not None:
+            pts.append((i, (int(center[0]), int(center[1]))))
+    return pts
 
-        if 'interpolated_position' in info and info['interpolated_position'] is not None:
-            pos = info['interpolated_position']
-        else:
-            box = info.get('box', [0, 0, 0, 0])
-            pos = (box[0] + box[2] / 2.0, box[1] + box[3] / 2.0)
-        
-        pos_int = (int(pos[0]), int(pos[1]))
-        source = info.get('source', 'yolo')
+
+def visualize_ball(det_ball, vis_frame, frame_idx, draw_path=True):
+    if not det_ball or frame_idx >= len(det_ball):
+        return
+
+    color_map = {
+        'yolo': (0, 255, 0),
+        'yolo-rescue': (0, 255, 255),
+        'csrt-agreed': (255, 255, 0),
+        'kinematic': (0, 0, 255),
+        'edge-suspected': (0, 0, 255),
+    }
+
+    if draw_path:
+        path_points = [p for _fi, p in _indexed_ball_points(det_ball, frame_idx)]
+        if len(path_points) > 1:
+            arr = np.array(path_points, dtype=np.int32)
+            cv2.polylines(vis_frame, [arr], False, (255, 220, 100), 2, cv2.LINE_AA)
+
+    current_info = det_ball[frame_idx]
+    if current_info is not None and not current_info.get('ghost', False):
+        source = current_info.get('source', 'yolo')
         color = color_map.get(source, (0, 255, 0))
-
-        if prev_pos is not None:
-            cv2.line(vis_frame, prev_pos, pos_int, color, 2)
-        
-        cv2.circle(vis_frame, pos_int, 2, color, -1)
-        prev_pos = pos_int
-
-        if i == frame_idx:
-            raw_box = info.get('box', [0, 0, 0, 0])
-            curr_center = (int(raw_box[0] + raw_box[2]/2), int(raw_box[1] + raw_box[3]/2))
-            
-            radius = int((raw_box[2] + raw_box[3]) / 4) if raw_box[2] > 0 else 5
-            
-            cv2.circle(vis_frame, curr_center, radius, color, 2) 
-            cv2.putText(vis_frame, "Ball", (curr_center[0] + radius + 5, curr_center[1]), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        raw_box = current_info.get('box', [0, 0, 0, 0])
+        center = _ball_center(current_info)
+        if center is None:
+            return
+        curr_center = (int(center[0]), int(center[1]))
+        radius = int((raw_box[2] + raw_box[3]) / 4) if raw_box[2] > 0 else 5
+        cv2.circle(vis_frame, curr_center, radius, color, 2)
+        cv2.putText(vis_frame, "Ball", (curr_center[0] + radius + 5, curr_center[1]),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
 def visualize_pose(det_pose, vis_frame):
     if not det_pose:
@@ -204,7 +220,16 @@ def _draw_dashed_polyline(img, pts, color, thickness=2, dash_length=10, gap_leng
             draw = not draw
 
 
-def visualize_lbw_overlay(vis_frame, lbw_overlay, frame_idx):
+def _as_polyline_points(data):
+    pts = []
+    for p in data or []:
+        if not isinstance(p, (list, tuple)) or len(p) < 2:
+            continue
+        pts.append((int(round(float(p[0]))), int(round(float(p[1])))))
+    return pts
+
+
+def visualize_lbw_overlay(vis_frame, lbw_overlay, frame_idx, det_ball=None):
     if not lbw_overlay:
         return
 
@@ -224,17 +249,59 @@ def visualize_lbw_overlay(vis_frame, lbw_overlay, frame_idx):
             cv2.LINE_AA,
         )
 
-    fitted = lbw_overlay.get("fitted_polyline") or []
-    if len(fitted) > 1:
-        arr = np.array([(int(x), int(y)) for x, y in fitted], dtype=np.int32)
-        cv2.polylines(vis_frame, [arr], False, (255, 220, 100), 2, cv2.LINE_AA)
+    impact_frame_idx = lbw_overlay.get("impact_frame_idx")
+    pitch_frame_idx = lbw_overlay.get("pitch_frame_idx")
+    if pitch_frame_idx is None:
+        pitch_frame_idx = lbw_overlay.get("bounce_frame")
 
-    ext = lbw_overlay.get("predicted_extension") or []
-    if len(ext) > 1:
-        _draw_dashed_polyline(vis_frame, ext, (255, 100, 255), thickness=2)
+    # Trajectory policy:
+    # 1) Draw detected-ball path until impact.
+    # 2) Change color once pitch is reached.
+    # 3) After impact: only pad-contact gets projected path; bat-contact stops path.
+    draw_until = frame_idx
+    if impact_frame_idx is not None and frame_idx >= int(impact_frame_idx):
+        draw_until = min(frame_idx, int(impact_frame_idx))
+
+    indexed_points = _indexed_ball_points(det_ball, draw_until)
+    if indexed_points:
+        if pitch_frame_idx is None:
+            all_pts = [p for _fi, p in indexed_points]
+            if len(all_pts) > 1:
+                arr = np.array(all_pts, dtype=np.int32)
+                cv2.polylines(vis_frame, [arr], False, (255, 220, 100), 2, cv2.LINE_AA)
+        else:
+            pfi = int(pitch_frame_idx)
+            pre_pts = [p for fi, p in indexed_points if fi <= pfi]
+            post_pts = [p for fi, p in indexed_points if fi >= pfi]
+            if len(pre_pts) > 1:
+                arr = np.array(pre_pts, dtype=np.int32)
+                cv2.polylines(vis_frame, [arr], False, (255, 220, 100), 2, cv2.LINE_AA)
+            if len(post_pts) > 1:
+                arr = np.array(post_pts, dtype=np.int32)
+                cv2.polylines(vis_frame, [arr], False, (0, 255, 255), 2, cv2.LINE_AA)
+    else:
+        # Fallback for legacy overlays without det_ball context.
+        fitted = lbw_overlay.get("fitted_polyline") or []
+        fitted_start = int(lbw_overlay.get("fitted_start_frame", 0) or 0)
+        total_visible = max(0, min(len(fitted), frame_idx - fitted_start + 1))
+        fitted_visible = _as_polyline_points(fitted[:total_visible])
+        if len(fitted_visible) > 1:
+            arr = np.array(fitted_visible, dtype=np.int32)
+            cv2.polylines(vis_frame, [arr], False, (255, 220, 100), 2, cv2.LINE_AA)
+
+    ext = lbw_overlay.get("projected_from_impact_polyline") or lbw_overlay.get("predicted_extension") or []
+    has_pad_contact = bool(lbw_overlay.get("pad_contact", False))
+    impact_target = str(lbw_overlay.get("impact_target") or "").lower()
+    should_project = has_pad_contact or impact_target == "pad"
+    if len(ext) > 1 and should_project and impact_frame_idx is not None and frame_idx >= int(impact_frame_idx):
+        # Reveal extension gradually after impact so it appears animated in sequence.
+        ext_visible_count = min(len(ext), max(0, (int(frame_idx) - int(impact_frame_idx) + 1) * 2))
+        ext_visible = _as_polyline_points(ext[:ext_visible_count])
+        if len(ext_visible) > 1:
+            _draw_dashed_polyline(vis_frame, ext_visible, (255, 90, 210), thickness=2)
 
     pp = lbw_overlay.get("pitch_point")
-    if pp is not None:
+    if pp is not None and pitch_frame_idx is not None and frame_idx >= int(pitch_frame_idx):
         c = (int(pp[0]), int(pp[1]))
         cv2.circle(vis_frame, c, 8, (0, 255, 255), 2)
         cv2.putText(
@@ -249,7 +316,7 @@ def visualize_lbw_overlay(vis_frame, lbw_overlay, frame_idx):
         )
 
     ip = lbw_overlay.get("impact_point")
-    if ip is not None:
+    if ip is not None and impact_frame_idx is not None and frame_idx >= int(impact_frame_idx):
         c = (int(ip[0]), int(ip[1]))
         cv2.circle(vis_frame, c, 8, (0, 165, 255), 2)
         cv2.putText(
@@ -264,7 +331,7 @@ def visualize_lbw_overlay(vis_frame, lbw_overlay, frame_idx):
         )
 
     sp = lbw_overlay.get("stump_intersection")
-    if sp is not None:
+    if sp is not None and impact_frame_idx is not None and frame_idx >= int(impact_frame_idx):
         c = (int(sp[0]), int(sp[1]))
         cv2.circle(vis_frame, c, 10, (100, 255, 100), 2)
         cv2.putText(
@@ -316,14 +383,15 @@ def visualize_frame(
 ):
     vis_frame = frame
 
-    visualize_ball(det_ball, vis_frame, frame_idx)
+    # Keep live pass clean: trajectory is drawn only by LBW overlay after analysis.
+    visualize_ball(det_ball, vis_frame, frame_idx, draw_path=False)
     visualize_bat(det_bats, vis_frame)
     visualize_batsman(det_batsman_box, det_persons, vis_frame)
     visualize_wicket(det_wickets, vis_frame)
     visualize_pose(det_pose, vis_frame)
     visualize_pads(det_pads, vis_frame)
 
-    visualize_lbw_overlay(vis_frame, lbw_overlay, frame_idx)
+    visualize_lbw_overlay(vis_frame, lbw_overlay, frame_idx, det_ball=det_ball)
 
     _draw_frame_info(vis_frame, frame_idx)
 

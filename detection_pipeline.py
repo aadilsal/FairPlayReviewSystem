@@ -2,14 +2,19 @@ import cv2
 import json
 import os
 import re
+import os
+import re
 import numpy as np
+import logging
 import logging
 
 from BallDetection.pipeline.ball_detector import detect_ball
 from BallDetection.pipeline.trajectory import fit_trajectory
+from BallDetection.pipeline.trajectory import fit_trajectory
 from pose_estimator import estimate_pose
 from person_detector import detect_persons
 from pad_detector import detect_pads
+from bat_detector import detect_bat
 from bat_detector import detect_bat
 from Batsman_finder import BatsmanFinder
 from Batsman_tracker import BatsmanTracker
@@ -17,22 +22,18 @@ from wicket_detector import detect_wicket
 from visualizer import visualize_frame
 from global_config import GLOBAL_CONFIG
 from preprocessing import preprocess_frame
-from lbw_analyzer import (
+from LbwDecision.lbw_analyzer import (
     analyze_lbw_sequence,
     build_anchors_from_ball_infos,
     lbw_overlay_for_api,
-    missing_clip_overlay,
 )
-from lbw_review_card import render_lbw_review_card
-
+from LbwDecision.lbw_review_card import render_lbw_review_card
 
 logger = logging.getLogger("fairplay.pipeline")
-
 
 def _safe_video_stem(name: str) -> str:
     s = re.sub(r"[^a-zA-Z0-9._-]+", "_", (name or "").strip())
     return (s[:120] or "video").strip("_")
-
 
 def _sanitize_for_json(obj):
     if isinstance(obj, dict):
@@ -46,6 +47,61 @@ def _sanitize_for_json(obj):
     return obj
 
 
+def _pick_pose_for_batsman(keypoints_list, batsman_box):
+    """Return only the pose instance that best overlaps the batsman bbox."""
+    if not keypoints_list or not batsman_box or len(batsman_box) < 4:
+        return []
+
+    bx, by, bw, bh = [float(v) for v in batsman_box[:4]]
+    b_x1, b_y1, b_x2, b_y2 = bx, by, bx + bw, by + bh
+    b_cx = (b_x1 + b_x2) / 2.0
+    b_cy = (b_y1 + b_y2) / 2.0
+
+    def _pose_bounds(kps):
+        arr = np.asarray(kps)
+        if arr.ndim != 2 or arr.shape[1] < 2:
+            return None
+        valid = (arr[:, 0] > 0) & (arr[:, 1] > 0)
+        if not np.any(valid):
+            return None
+        pts = arr[valid, :2]
+        x1, y1 = np.min(pts[:, 0]), np.min(pts[:, 1])
+        x2, y2 = np.max(pts[:, 0]), np.max(pts[:, 1])
+        return float(x1), float(y1), float(x2), float(y2)
+
+    best = None
+    best_score = None
+    for kps in keypoints_list:
+        pb = _pose_bounds(kps)
+        if pb is None:
+            continue
+        p_x1, p_y1, p_x2, p_y2 = pb
+
+        inter_x1 = max(b_x1, p_x1)
+        inter_y1 = max(b_y1, p_y1)
+        inter_x2 = min(b_x2, p_x2)
+        inter_y2 = min(b_y2, p_y2)
+        inter_w = max(0.0, inter_x2 - inter_x1)
+        inter_h = max(0.0, inter_y2 - inter_y1)
+        inter = inter_w * inter_h
+
+        p_area = max(1.0, (p_x2 - p_x1) * (p_y2 - p_y1))
+        b_area = max(1.0, (b_x2 - b_x1) * (b_y2 - b_y1))
+        iou = inter / (p_area + b_area - inter + 1e-9)
+
+        p_cx = (p_x1 + p_x2) / 2.0
+        p_cy = (p_y1 + p_y2) / 2.0
+        center_dist = float(np.hypot(p_cx - b_cx, p_cy - b_cy))
+
+        # Higher IoU is better, then closer center.
+        score = (iou, -center_dist)
+        if best_score is None or score > best_score:
+            best_score = score
+            best = kps
+
+    return [best] if best is not None else []
+
+
 def process_frames_pipeline(
     frame_paths,
     person_conf,
@@ -57,6 +113,7 @@ def process_frames_pipeline(
     preprocess,
     display,
     wicket_override=None,
+    dynamic_wicket_detection=True,
     video_stem=None,
 ):
     batsman_finder = BatsmanFinder(
@@ -67,6 +124,7 @@ def process_frames_pipeline(
     tracking_active = False
 
     all_ball_infos = []
+    detection_frames = []
     frame_records = []
     n_paths = len(frame_paths)
     if n_paths == 0:
@@ -83,6 +141,7 @@ def process_frames_pipeline(
         if clean_frame is None:
             print(f"[WARN] Could not read {frame_path}")
             all_ball_infos.append(None)
+            all_ball_infos.append(None)
             continue
 
         if preprocess:
@@ -96,6 +155,8 @@ def process_frames_pipeline(
             )
         else:
             frame = clean_frame.copy()
+
+        detection_frames.append(frame.copy())
 
         metadata = {
             "frame_index": frame_idx,
@@ -115,13 +176,16 @@ def process_frames_pipeline(
         det_bats = []
         det_pads = []
 
-        if wicket_override:
+        if wicket_override is not None:
             det_wickets = wicket_override
-            metadata["detections"].extend(det_wickets)
-        else:
+            if det_wickets:
+                metadata["detections"].extend(det_wickets)
+        elif dynamic_wicket_detection:
             _, det_wickets = detect_wicket(frame.copy(), conf=wicket_conf)
             if det_wickets:
                 metadata["detections"].extend(det_wickets)
+        else:
+            det_wickets = []
 
         _, det_bats = detect_bat(frame.copy(), conf=bat_conf)
         for b in det_bats:
@@ -139,12 +203,14 @@ def process_frames_pipeline(
                 frame_idx
             )
 
+
             if finder_meta.get("batsman_confirmed", False):
                 bbox = finder_meta["batsman_bbox"]
                 if batsman_tracker.init_tracker(frame, bbox):
                     tracking_active = True
                     metadata["tracking_active"] = True
                     det_batsman_box = list(map(int, bbox))
+                    logger.info("Batsman confirmed at frame %s", frame_idx)
                     logger.info("Batsman confirmed at frame %s", frame_idx)
         else:
             ok, bbox = batsman_tracker.update(frame.copy())
@@ -154,20 +220,22 @@ def process_frames_pipeline(
                 metadata["detections"].append({"label": "Batsman", "box": det_batsman_box, "tracked": True})
             else:
                 logger.warning("Tracker lost at frame %s", frame_idx)
+                logger.warning("Tracker lost at frame %s", frame_idx)
                 tracking_active = False
                 batsman_finder = BatsmanFinder(iou_thresh=iou_thresh, consec_required=consec_required)
                 batsman_tracker = BatsmanTracker()
 
         if det_batsman_box:
+        if det_batsman_box:
             _, kps = estimate_pose(frame.copy(), bbox=det_batsman_box)
-            det_pose.extend(kps)
+            # Keep only the pose that best corresponds to the batsman box.
+            det_pose = _pick_pose_for_batsman(kps, det_batsman_box)
+            _, det_pads = detect_pads(frame.copy(), det_pose, conf=pad_conf)
         else:
-            for p in det_persons:
-                box = list(p[:4])
-                _, kps = estimate_pose(frame.copy(), bbox=box)
-                det_pose.extend(kps)
+            # Do not run pose/pad estimation for non-batsman persons.
+            det_pose = []
+            det_pads = []
 
-        _, det_pads = detect_pads(frame.copy(), det_pose, conf=pad_conf)
         for p in det_pads:
             metadata["detections"].append({"label": "Pad", "box": p["box"], "conf": p.get("conf", 0.0)})
 
@@ -182,29 +250,83 @@ def process_frames_pipeline(
             "metadata": metadata,
         })
 
+        if display:
+            live_frame = visualize_frame(
+                frame.copy(),
+                all_ball_infos,
+                det_persons,
+                det_batsman_box,
+                det_wickets,
+                det_bats,
+                det_pads,
+                det_pose,
+                frame_idx,
+                lbw_overlay=None,
+            )
+            cv2.putText(
+                live_frame,
+                "LIVE: detection / tracking",
+                (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            cv2.imshow("FairPlayReviewSystem - Live", live_frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                display = False
+
+    for rec, ball_info in zip(frame_records, all_ball_infos):
+        detections = [d for d in rec["metadata"]["detections"] if d.get("label") != "Ball"]
+        if ball_info is not None and not ball_info.get("ghost", False):
+            detections.insert(0, {"label": "Ball", "data": ball_info})
+        rec["metadata"]["detections"] = detections
+
     anchors = build_anchors_from_ball_infos(all_ball_infos)
     trajectory_model = fit_trajectory(anchors)
 
     wickets_by_fi = {}
     pads_by_fi = {}
     batsman_by_fi = {}
+    bats_by_fi = {}
     for r in frame_records:
         fi = int(r["metadata"]["frame_index"])
         wickets_by_fi[fi] = r["det_wickets"]
         pads_by_fi[fi] = r["det_pads"]
         batsman_by_fi[fi] = r["det_batsman_box"]
+        bats_by_fi[fi] = r["det_bats"]
 
-    lbw_overlay = missing_clip_overlay(0)
+    # Initialize default LBW overlay
+    lbw_overlay = {
+        "pitch_inline": False,
+        "impact_inline": False,
+        "pad_contact": False,
+        "wickets_hitting": False,
+        "pitch_point": None,
+        "impact_point": None,
+        "bounce_frame": None,
+        "impact_frame_idx": None,
+        "stump_intersection": None,
+        "fitted_polyline": [],
+        "predicted_extension": [],
+        "wicket_line": None,
+        "decision": "NOT OUT",
+        "geometric_lbw": False,
+        "reason": "No ball or wicket detections available",
+    }
     if n_paths > 0:
         wickets_frames = [wickets_by_fi.get(i, []) for i in range(n_paths)]
         pads_frames = [pads_by_fi.get(i, []) for i in range(n_paths)]
         batsman_frames = [batsman_by_fi.get(i, None) for i in range(n_paths)]
+        bats_frames = [bats_by_fi.get(i, []) for i in range(n_paths)]
         lbw_overlay = analyze_lbw_sequence(
             all_ball_infos,
             trajectory_model,
             wickets_frames,
             pads_frames,
             batsman_frames,
+            bats_frames,
         )
 
     frames_dir = None
@@ -261,11 +383,6 @@ def process_frames_pipeline(
         meta_path = os.path.splitext(frame_path)[0] + ".json"
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(_sanitize_for_json(metadata), f, indent=2)
-        if display:
-            cv2.imshow("FairPlayReviewSystem", vis_frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-
     if video_stem and frames_dir and frame_records:
         safe = _safe_video_stem(str(video_stem))
         parent_dir = os.path.dirname(os.path.abspath(frames_dir))
@@ -362,3 +479,4 @@ def process_frames_pipeline(
 
     logger.info("Pipeline completed for %s frames", n_paths)
     cv2.destroyAllWindows()
+

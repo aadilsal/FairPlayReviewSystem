@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class YOLOBallDetector:
     def __init__(self, model1_path=None, model2_path=None):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.model1_path = model1_path if model1_path and os.path.isfile(model1_path) else DETECTION_CONFIG.get('model1_path', 'weights/ball-yolov8s.pt')
+        self.model1_path = model1_path if model1_path and os.path.isfile(model1_path) else DETECTION_CONFIG.get('model1_path', 'weights/ball_weights_new.pt')
         self.model2_path = model2_path if model2_path and os.path.isfile(model2_path) else DETECTION_CONFIG.get('model2_path', 'weights/yolov8_cricket_ball2/weights/best.pt')
         try:
             self.model1 = YOLO(self.model1_path)
