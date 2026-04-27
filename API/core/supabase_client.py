@@ -2,13 +2,18 @@ from supabase import create_client, Client
 from typing import Optional
 from API.core.config import settings
 
+# storage3 expects a trailing slash for the storage endpoint base URL.
+_SUPABASE_URL = (settings.SUPABASE_URL or "").strip()
+if _SUPABASE_URL and not _SUPABASE_URL.endswith("/"):
+    _SUPABASE_URL += "/"
+
 # Initialize Supabase client
-supabase_client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+supabase_client: Client = create_client(_SUPABASE_URL, settings.SUPABASE_KEY)
 
 # Optional admin client for server-side auth admin operations
 supabase_admin_client: Optional[Client] = None
 if settings.SUPABASE_SERVICE_ROLE_KEY:
-    supabase_admin_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+    supabase_admin_client = create_client(_SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
 
 def get_supabase():
     """Get Supabase client instance"""
