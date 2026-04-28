@@ -226,7 +226,7 @@ def process_frames_pipeline(
                 batsman_tracker = BatsmanTracker()
 
         if det_batsman_box:
-        if det_batsman_box:
+       # if det_batsman_box:
             _, kps = estimate_pose(frame.copy(), bbox=det_batsman_box)
             # Keep only the pose that best corresponds to the batsman box.
             det_pose = _pick_pose_for_batsman(kps, det_batsman_box)

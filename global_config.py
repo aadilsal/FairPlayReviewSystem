@@ -8,7 +8,7 @@ GLOBAL_CONFIG = {
     'blur_threshold': 100.0,
     'fps': 60,
     'person_conf': 0.5,
-    'bat_conf': 0.1,
+    'bat_conf': 0.2,
     'iou_thresh': 0.05,
     'consec_frames': 3,
     'wicket_conf': 0.25,
